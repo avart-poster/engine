@@ -1,66 +1,56 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import Response
-from fastapi.middleware.cors import CORSMiddleware
-
 import numpy as np
 import cv2
 
-
 app = FastAPI(title="Avart Engine")
-
-# allow calls from avart website later
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 @app.get("/")
 def root():
-    return {"hello": "world"}
-
+    return {"ok": True, "service": "avart-engine"}
 
 @app.get("/health")
 def health():
     return {"ok": True}
 
+def _read_upload_to_bgr(file_bytes: bytes) -> np.ndarray:
+    arr = np.frombuffer(file_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Could not decode image. Please upload JPG/PNG.")
+    return img
 
-@app.post("/stroke/preview")
-async def stroke_preview(file: UploadFile = File(...)):
+@app.post("/stroke/preview", response_class=Response)
+async def stroke_preview(
+    file: UploadFile = File(...),
+    stroke_px: int = 3,
+):
+    """
+    Upload a portrait (JPG/PNG) and get a simple contour stroke preview (PNG).
+    This is a *starter* endpoint — we will improve quality next.
+    """
+    data = await file.read()
+    img = _read_upload_to_bgr(data)
 
-    contents = await file.read()
-
-    img_array = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
+    # --- Simple contour extraction (starter) ---
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (7, 7), 0)
 
-    edges = cv2.Canny(gray, 60, 140)
+    edges = cv2.Canny(blur, 40, 120)
 
-    contours, _ = cv2.findContours(
-        edges,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
+    # Make lines thicker
+    k = max(1, int(stroke_px))
+    kernel = np.ones((k, k), np.uint8)
+    edges = cv2.dilate(edges, kernel, iterations=1)
 
-    canvas = np.zeros((img.shape[0], img.shape[1], 4), dtype=np.uint8)
+    # Convert to black lines on transparent background (RGBA)
+    h, w = edges.shape
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[..., 3] = 0  # fully transparent
+    rgba[edges > 0] = (0, 0, 0, 255)  # black opaque where edges are
 
-    if contours:
-        biggest = max(contours, key=cv2.contourArea)
+    ok, png = cv2.imencode(".png", rgba)
+    if not ok:
+        return Response(status_code=500, content=b"Could not encode PNG")
 
-        cv2.drawContours(
-            canvas,
-            [biggest],
-            -1,
-            (0, 0, 0, 255),
-            4
-        )
-
-    _, png = cv2.imencode(".png", canvas)
-
-    return Response(
-        content=png.tobytes(),
-        media_type="image/png"
-    )
+    return Response(content=png.tobytes(), media_type="image/png")
