@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import io
+from typing import Tuple
 
 import cv2
 import numpy as np
 from PIL import Image
-from rembg import remove
-
 from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 
 app = FastAPI(
     title="avart-engine",
-    version="0.5.0",
-    description="STEP 1B: silhouette preview using rembg + smoothed outer contour",
+    version="0.6.0",
+    description="Alpha-based silhouette engine for Avart",
 )
 
 app.add_middleware(
@@ -31,35 +30,41 @@ def health():
     return {"ok": True, "service": "avart-engine"}
 
 
-def read_upload_to_bgr(upload: UploadFile) -> np.ndarray:
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
+
+def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
+    """
+    Read uploaded file as RGBA image.
+    Expects PNG with transparency for best result.
+    Returns numpy array shape (H, W, 4)
+    """
     data = upload.file.read()
     if not data:
         raise ValueError("Empty file")
-    arr = np.frombuffer(data, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Could not decode image. Please upload JPG or PNG.")
-    return img
+
+    pil = Image.open(io.BytesIO(data)).convert("RGBA")
+    rgba = np.array(pil)
+
+    if rgba is None or rgba.shape[2] != 4:
+        raise ValueError("Could not decode RGBA image")
+    return rgba
 
 
-def create_subject_mask_rembg(bgr: np.ndarray, smooth: bool = True) -> np.ndarray:
+def alpha_to_mask(
+    rgba: np.ndarray,
+    alpha_threshold: int = 10,
+    smooth: bool = True,
+) -> np.ndarray:
     """
-    Use rembg to remove background and extract alpha mask.
-    Returns binary mask:
+    Convert alpha channel to binary mask:
     subject = 255
     background = 0
     """
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(rgb)
-
-    out = remove(pil_img)
-    out_rgba = out.convert("RGBA")
-    rgba = np.array(out_rgba)
-
     alpha = rgba[:, :, 3]
 
-    # Make binary mask
-    _, mask = cv2.threshold(alpha, 10, 255, cv2.THRESH_BINARY)
+    _, mask = cv2.threshold(alpha, alpha_threshold, 255, cv2.THRESH_BINARY)
 
     if smooth:
         mask = cv2.GaussianBlur(mask, (7, 7), 0)
@@ -73,6 +78,9 @@ def create_subject_mask_rembg(bgr: np.ndarray, smooth: bool = True) -> np.ndarra
 
 
 def keep_largest_component(mask: np.ndarray) -> np.ndarray:
+    """
+    Keep only largest connected white component.
+    """
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if num_labels <= 1:
         return mask
@@ -84,6 +92,9 @@ def keep_largest_component(mask: np.ndarray) -> np.ndarray:
 
 
 def smooth_contour(contour: np.ndarray, window: int = 17) -> np.ndarray:
+    """
+    Moving average smoothing over contour points.
+    """
     pts = contour[:, 0, :].astype(np.float32)
     n = len(pts)
 
@@ -110,6 +121,9 @@ def get_smoothed_outer_contour(
     epsilon_ratio: float = 0.0015,
     smooth_window: int = 17,
 ) -> np.ndarray:
+    """
+    Find outer contour, simplify slightly, then smooth.
+    """
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         raise ValueError("No contour found")
@@ -130,7 +144,27 @@ def render_preview_png(
     height: int,
     thickness: int = 2,
     upscale: int = 4,
+    crop_to_subject: bool = False,
+    pad: int = 30,
 ) -> bytes:
+    """
+    Draw contour as black stroke on white background.
+    Optional crop_to_subject for testing.
+    """
+    if crop_to_subject:
+        x, y, w, h = cv2.boundingRect(contour)
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(width, x + w + pad)
+        y2 = min(height, y + h + pad)
+
+        contour = contour.copy()
+        contour[:, 0, 0] -= x1
+        contour[:, 0, 1] -= y1
+
+        width = x2 - x1
+        height = y2 - y1
+
     W = width * upscale
     H = height * upscale
 
@@ -162,7 +196,27 @@ def contour_to_svg(
     width: int,
     height: int,
     stroke_width: float = 2.0,
+    crop_to_subject: bool = False,
+    pad: int = 30,
 ) -> str:
+    """
+    Convert contour to SVG path.
+    STEP 1 version = polyline path, not bezier yet.
+    """
+    if crop_to_subject:
+        x, y, w, h = cv2.boundingRect(contour)
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(width, x + w + pad)
+        y2 = min(height, y + h + pad)
+
+        contour = contour.copy()
+        contour[:, 0, 0] -= x1
+        contour[:, 0, 1] -= y1
+
+        width = x2 - x1
+        height = y2 - y1
+
     pts = contour[:, 0, :]
     if len(pts) < 3:
         raise ValueError("Contour too small for SVG")
@@ -180,21 +234,29 @@ def contour_to_svg(
     return svg
 
 
-@app.post("/silhouette/preview")
-async def silhouette_preview(
+# --------------------------------------------------
+# API
+# --------------------------------------------------
+
+@app.post("/alpha/preview")
+async def alpha_preview(
     file: UploadFile = File(...),
+    alpha_threshold: int = Query(10, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.0015, ge=0.0003, le=0.02),
     smooth_window: int = Query(17, ge=5, le=51),
     thickness: int = Query(2, ge=1, le=8),
     upscale: int = Query(4, ge=1, le=8),
+    crop_to_subject: bool = Query(False),
+    pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        bgr = read_upload_to_bgr(file)
-        h, w = bgr.shape[:2]
+        rgba = read_upload_to_rgba(file)
+        h, w = rgba.shape[:2]
 
-        mask = create_subject_mask_rembg(
-            bgr,
+        mask = alpha_to_mask(
+            rgba,
+            alpha_threshold=alpha_threshold,
             smooth=smooth,
         )
 
@@ -210,6 +272,8 @@ async def silhouette_preview(
             height=h,
             thickness=thickness,
             upscale=upscale,
+            crop_to_subject=crop_to_subject,
+            pad=pad,
         )
 
         return Response(content=png, media_type="image/png")
@@ -218,20 +282,24 @@ async def silhouette_preview(
         return JSONResponse({"error": str(e)}, status_code=400)
 
 
-@app.post("/silhouette/svg")
-async def silhouette_svg(
+@app.post("/alpha/svg")
+async def alpha_svg(
     file: UploadFile = File(...),
+    alpha_threshold: int = Query(10, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.0015, ge=0.0003, le=0.02),
     smooth_window: int = Query(17, ge=5, le=51),
     stroke_width: float = Query(2.0, ge=0.5, le=10.0),
+    crop_to_subject: bool = Query(False),
+    pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        bgr = read_upload_to_bgr(file)
-        h, w = bgr.shape[:2]
+        rgba = read_upload_to_rgba(file)
+        h, w = rgba.shape[:2]
 
-        mask = create_subject_mask_rembg(
-            bgr,
+        mask = alpha_to_mask(
+            rgba,
+            alpha_threshold=alpha_threshold,
             smooth=smooth,
         )
 
@@ -246,6 +314,8 @@ async def silhouette_svg(
             width=w,
             height=h,
             stroke_width=stroke_width,
+            crop_to_subject=crop_to_subject,
+            pad=pad,
         )
 
         return Response(content=svg, media_type="image/svg+xml")
