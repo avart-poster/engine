@@ -50,6 +50,7 @@ def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
     if rgba is None or rgba.shape[2] != 4:
         raise ValueError("Could not decode RGBA image")
     return rgba
+    
 def alpha_to_mask(
     rgba: np.ndarray,
     alpha_threshold: int = 1,
@@ -117,8 +118,8 @@ def smooth_contour(contour: np.ndarray, window: int = 17) -> np.ndarray:
 
 def get_smoothed_outer_contour(
     mask: np.ndarray,
-    epsilon_ratio: float = 0.0015,
-    smooth_window: int = 17,
+    epsilon_ratio: float = 0.001,
+    smooth_window: int = 15,
 ) -> np.ndarray:
     """
     Find outer contour, simplify slightly, then smooth.
