@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-import numpy as np
+import io
+
 import cv2
+import numpy as np
+from PIL import Image
+from rembg import remove
+
 from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 
 app = FastAPI(
     title="avart-engine",
-    version="0.4.0",
-    description="STEP 1 improved: silhouette preview with GrabCut + smoothed outer contour",
+    version="0.5.0",
+    description="STEP 1B: silhouette preview using rembg + smoothed outer contour",
 )
 
 app.add_middleware(
@@ -37,6 +42,36 @@ def read_upload_to_bgr(upload: UploadFile) -> np.ndarray:
     return img
 
 
+def create_subject_mask_rembg(bgr: np.ndarray, smooth: bool = True) -> np.ndarray:
+    """
+    Use rembg to remove background and extract alpha mask.
+    Returns binary mask:
+    subject = 255
+    background = 0
+    """
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(rgb)
+
+    out = remove(pil_img)
+    out_rgba = out.convert("RGBA")
+    rgba = np.array(out_rgba)
+
+    alpha = rgba[:, :, 3]
+
+    # Make binary mask
+    _, mask = cv2.threshold(alpha, 10, 255, cv2.THRESH_BINARY)
+
+    if smooth:
+        mask = cv2.GaussianBlur(mask, (7, 7), 0)
+        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    return keep_largest_component(mask)
+
+
 def keep_largest_component(mask: np.ndarray) -> np.ndarray:
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if num_labels <= 1:
@@ -46,73 +81,6 @@ def keep_largest_component(mask: np.ndarray) -> np.ndarray:
     clean = np.zeros_like(mask)
     clean[labels == largest_label] = 255
     return clean
-
-
-def create_subject_mask_grabcut(
-    bgr: np.ndarray,
-    smooth: bool = True,
-    iterations: int = 5,
-) -> np.ndarray:
-    """
-    Create subject mask using GrabCut.
-    subject = 255
-    background = 0
-    """
-    h, w = bgr.shape[:2]
-
-    # Slight resize for stability / speed
-    scale = 1.0
-    max_side = 1400
-    if max(h, w) > max_side:
-        scale = max_side / max(h, w)
-        bgr_small = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-    else:
-        bgr_small = bgr.copy()
-
-    hs, ws = bgr_small.shape[:2]
-
-    mask = np.zeros((hs, ws), np.uint8)
-    bgd_model = np.zeros((1, 65), np.float64)
-    fgd_model = np.zeros((1, 65), np.float64)
-
-    # Large inner rectangle: assume subject is inside
-    margin_x = max(10, int(ws * 0.08))
-    margin_y = max(10, int(hs * 0.05))
-    rect = (margin_x, margin_y, ws - 2 * margin_x, hs - 2 * margin_y)
-
-    cv2.grabCut(
-        bgr_small,
-        mask,
-        rect,
-        bgd_model,
-        fgd_model,
-        iterations,
-        cv2.GC_INIT_WITH_RECT,
-    )
-
-    # Foreground mask
-    result_mask = np.where(
-        (mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD),
-        255,
-        0
-    ).astype("uint8")
-
-    # Clean up
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    result_mask = cv2.morphologyEx(result_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    result_mask = cv2.morphologyEx(result_mask, cv2.MORPH_OPEN, kernel, iterations=1)
-
-    if smooth:
-        result_mask = cv2.GaussianBlur(result_mask, (7, 7), 0)
-        _, result_mask = cv2.threshold(result_mask, 127, 255, cv2.THRESH_BINARY)
-
-    result_mask = keep_largest_component(result_mask)
-
-    # Resize back to original size
-    if scale != 1.0:
-        result_mask = cv2.resize(result_mask, (w, h), interpolation=cv2.INTER_NEAREST)
-
-    return result_mask
 
 
 def smooth_contour(contour: np.ndarray, window: int = 17) -> np.ndarray:
@@ -216,7 +184,6 @@ def contour_to_svg(
 async def silhouette_preview(
     file: UploadFile = File(...),
     smooth: bool = Query(True),
-    iterations: int = Query(5, ge=1, le=10),
     epsilon_ratio: float = Query(0.0015, ge=0.0003, le=0.02),
     smooth_window: int = Query(17, ge=5, le=51),
     thickness: int = Query(2, ge=1, le=8),
@@ -226,10 +193,9 @@ async def silhouette_preview(
         bgr = read_upload_to_bgr(file)
         h, w = bgr.shape[:2]
 
-        mask = create_subject_mask_grabcut(
+        mask = create_subject_mask_rembg(
             bgr,
             smooth=smooth,
-            iterations=iterations,
         )
 
         contour = get_smoothed_outer_contour(
@@ -256,7 +222,6 @@ async def silhouette_preview(
 async def silhouette_svg(
     file: UploadFile = File(...),
     smooth: bool = Query(True),
-    iterations: int = Query(5, ge=1, le=10),
     epsilon_ratio: float = Query(0.0015, ge=0.0003, le=0.02),
     smooth_window: int = Query(17, ge=5, le=51),
     stroke_width: float = Query(2.0, ge=0.5, le=10.0),
@@ -265,10 +230,9 @@ async def silhouette_svg(
         bgr = read_upload_to_bgr(file)
         h, w = bgr.shape[:2]
 
-        mask = create_subject_mask_grabcut(
+        mask = create_subject_mask_rembg(
             bgr,
             smooth=smooth,
-            iterations=iterations,
         )
 
         contour = get_smoothed_outer_contour(
