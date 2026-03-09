@@ -144,38 +144,40 @@ def find_face_zone_indices(points: np.ndarray, face_ratio: float = 0.22) -> tupl
     return longest
 
 
-def selective_smooth_contour(
-    contour: np.ndarray,
-    face_window: int = 7,
-    rest_window: int = 25,
-    face_ratio: float = 0.22,
+def get_smoothed_outer_contour(
+    mask: np.ndarray,
+    epsilon_ratio: float = 0.001,
+    smooth_window: int = 15,
 ) -> np.ndarray:
-    """
-    Smooth face zone lightly and the rest more aggressively.
-    """
-    pts = contour[:, 0, :].astype(np.float32)
-    n = len(pts)
 
-    if n < 20:
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+    if not contours:
+        raise ValueError("No contour found")
+
+    largest = max(contours, key=cv2.contourArea)
+
+    contour = largest
+    pts = contour[:, 0, :].astype(np.float32)
+
+    n = len(pts)
+    if n < smooth_window:
         return contour
 
-    start, end = find_face_zone_indices(pts, face_ratio=face_ratio)
+    if smooth_window % 2 == 0:
+        smooth_window += 1
 
-    smoothed_all = moving_average_closed(pts, rest_window)
-    smoothed_face = moving_average_closed(pts, face_window)
+    pad = smooth_window // 2
+    pts_pad = np.vstack([pts[-pad:], pts, pts[:pad]])
 
-    final = smoothed_all.copy()
+    smoothed = []
+    for i in range(n):
+        segment = pts_pad[i:i + smooth_window]
+        smoothed.append(segment.mean(axis=0))
 
-    if start <= end:
-        final[start:end + 1] = smoothed_face[start:end + 1]
-    else:
-        # wrap-around case
-        final[start:] = smoothed_face[start:]
-        final[:end + 1] = smoothed_face[:end + 1]
+    smoothed = np.array(smoothed, dtype=np.int32).reshape(-1, 1, 2)
 
-    final = np.round(final).astype(np.int32).reshape(-1, 1, 2)
-    return final
-
+    return smoothed
 
 def get_smoothed_outer_contour(
     mask: np.ndarray,
