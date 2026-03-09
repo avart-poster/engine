@@ -373,6 +373,35 @@ async def alpha_debug(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
+def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
+    """
+    Read uploaded PNG with transparency correctly.
+    """
+
+    data = upload.file.read()
+
+    if not data:
+        raise ValueError("Empty file")
+
+    # decode image with OpenCV
+    arr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        raise ValueError("Could not decode image")
+
+    # ensure image has alpha
+    if img.shape[2] == 3:
+        alpha = np.full((img.shape[0], img.shape[1], 1), 255, dtype=np.uint8)
+        img = np.concatenate([img, alpha], axis=2)
+
+    if img.shape[2] != 4:
+        raise ValueError("Image must have 4 channels")
+
+    # convert BGRA → RGBA
+    rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+
+    return rgba
 
 @app.post("/alpha/svg")
 async def alpha_svg(
