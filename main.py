@@ -56,6 +56,20 @@ def alpha_to_mask(
     alpha_threshold: int = 1,
     smooth: bool = True,
 ) -> np.ndarray:
+
+    alpha = rgba[:, :, 3]
+
+    # brug alpha direkte
+    mask = np.where(alpha > alpha_threshold, 255, 0).astype(np.uint8)
+
+    if smooth:
+        mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    return keep_largest_component(mask)
     """
     Convert alpha channel to binary mask:
     subject = 255
