@@ -69,7 +69,7 @@ def alpha_to_mask(
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-    return keep_largest_component(mask)
+    return mask
     """
     Convert alpha channel to binary mask:
     subject = 255
