@@ -11,8 +11,8 @@ from fastapi.responses import Response, JSONResponse
 
 app = FastAPI(
     title="avart-engine",
-    version="0.7.0",
-    description="Alpha-based silhouette engine for Avart",
+    version="0.8.0",
+    description="Alpha-based silhouette engine with selective smoothing",
 )
 
 app.add_middleware(
@@ -35,19 +35,30 @@ def health():
 
 def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
     """
-    Read uploaded file as RGBA image.
-    Best input is PNG with transparent background.
+    Read uploaded PNG with transparency correctly.
     """
     data = upload.file.read()
+
     if not data:
         raise ValueError("Empty file")
 
-    pil = Image.open(io.BytesIO(data)).convert("RGBA")
-    rgba = np.array(pil)
+    arr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
 
-    if rgba is None or len(rgba.shape) != 3 or rgba.shape[2] != 4:
-        raise ValueError("Could not decode RGBA image")
+    if img is None:
+        raise ValueError("Could not decode image")
 
+    if len(img.shape) != 3:
+        raise ValueError("Image must have color channels")
+
+    if img.shape[2] == 3:
+        alpha = np.full((img.shape[0], img.shape[1], 1), 255, dtype=np.uint8)
+        img = np.concatenate([img, alpha], axis=2)
+
+    if img.shape[2] != 4:
+        raise ValueError("Image must have 4 channels")
+
+    rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
     return rgba
 
 
@@ -62,7 +73,6 @@ def alpha_to_mask(
     background = 0
     """
     alpha = rgba[:, :, 3]
-
     mask = np.where(alpha > alpha_threshold, 255, 0).astype(np.uint8)
 
     if smooth:
@@ -75,37 +85,108 @@ def alpha_to_mask(
     return mask
 
 
-def smooth_contour(contour: np.ndarray, window: int = 15) -> np.ndarray:
+def moving_average_closed(points: np.ndarray, window: int) -> np.ndarray:
     """
-    Smooth contour using moving average.
+    Circular moving average for closed contour points.
+    points shape: (N, 2)
     """
-    pts = contour[:, 0, :].astype(np.float32)
-    n = len(pts)
-
-    if n < window or n < 20:
-        return contour
+    n = len(points)
+    if n < window or n < 10:
+        return points.copy()
 
     if window % 2 == 0:
         window += 1
 
     pad = window // 2
-    pts_pad = np.vstack([pts[-pad:], pts, pts[:pad]])
+    pts_pad = np.vstack([points[-pad:], points, points[:pad]])
 
-    smoothed = []
-    for i in range(n):
-        seg = pts_pad[i:i + window]
-        smoothed.append(seg.mean(axis=0))
+    kernel = np.ones(window, dtype=np.float32) / window
+    xs = np.convolve(pts_pad[:, 0], kernel, mode="valid")
+    ys = np.convolve(pts_pad[:, 1], kernel, mode="valid")
 
-    smoothed = np.array(smoothed, dtype=np.int32).reshape(-1, 1, 2)
+    smoothed = np.stack([xs, ys], axis=1)
     return smoothed
+
+
+def find_face_zone_indices(points: np.ndarray, face_ratio: float = 0.22) -> tuple[int, int]:
+    """
+    Find the contour section that is most likely the face profile.
+    Assumes face points are among the rightmost contour points.
+    Returns (start_idx, end_idx) on closed contour.
+    """
+    xs = points[:, 0]
+    x_max = xs.max()
+    x_min = xs.min()
+    span = max(1.0, x_max - x_min)
+
+    # Rightmost area = likely face zone
+    threshold = x_max - span * face_ratio
+    idx = np.where(xs >= threshold)[0]
+
+    if len(idx) == 0:
+        return 0, min(len(points) - 1, len(points) // 4)
+
+    # take longest consecutive run
+    runs = []
+    start = idx[0]
+    prev = idx[0]
+
+    for i in idx[1:]:
+        if i == prev + 1:
+            prev = i
+        else:
+            runs.append((start, prev))
+            start = i
+            prev = i
+    runs.append((start, prev))
+
+    longest = max(runs, key=lambda r: r[1] - r[0])
+    return longest
+
+
+def selective_smooth_contour(
+    contour: np.ndarray,
+    face_window: int = 7,
+    rest_window: int = 25,
+    face_ratio: float = 0.22,
+) -> np.ndarray:
+    """
+    Smooth face zone lightly and the rest more aggressively.
+    """
+    pts = contour[:, 0, :].astype(np.float32)
+    n = len(pts)
+
+    if n < 20:
+        return contour
+
+    start, end = find_face_zone_indices(pts, face_ratio=face_ratio)
+
+    smoothed_all = moving_average_closed(pts, rest_window)
+    smoothed_face = moving_average_closed(pts, face_window)
+
+    final = smoothed_all.copy()
+
+    if start <= end:
+        final[start:end + 1] = smoothed_face[start:end + 1]
+    else:
+        # wrap-around case
+        final[start:] = smoothed_face[start:]
+        final[:end + 1] = smoothed_face[:end + 1]
+
+    final = np.round(final).astype(np.int32).reshape(-1, 1, 2)
+    return final
 
 
 def get_smoothed_outer_contour(
     mask: np.ndarray,
     epsilon_ratio: float = 0.001,
-    smooth_window: int = 15,
+    face_window: int = 7,
+    rest_window: int = 25,
+    face_ratio: float = 0.22,
 ) -> np.ndarray:
-
+    """
+    Find outer contour and smooth it selectively.
+    """
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
     if not contours:
@@ -113,28 +194,17 @@ def get_smoothed_outer_contour(
 
     largest = max(contours, key=cv2.contourArea)
 
-    # DO NOT simplify contour yet
-    contour = largest
+    # Very light simplification only
+    peri = cv2.arcLength(largest, True)
+    eps = max(0.5, peri * epsilon_ratio)
+    approx = cv2.approxPolyDP(largest, eps, True)
 
-    # smooth contour
-    pts = contour[:, 0, :].astype(np.float32)
-
-    n = len(pts)
-    if n < smooth_window:
-        return contour
-
-    if smooth_window % 2 == 0:
-        smooth_window += 1
-
-    pad = smooth_window // 2
-    pts_pad = np.vstack([pts[-pad:], pts, pts[:pad]])
-
-    smoothed = []
-    for i in range(n):
-        segment = pts_pad[i:i+smooth_window]
-        smoothed.append(segment.mean(axis=0))
-
-    smoothed = np.array(smoothed, dtype=np.int32).reshape(-1,1,2)
+    smoothed = selective_smooth_contour(
+        approx,
+        face_window=face_window,
+        rest_window=rest_window,
+        face_ratio=face_ratio,
+    )
 
     return smoothed
 
@@ -145,9 +215,6 @@ def crop_contour_to_subject(
     height: int,
     pad: int = 30,
 ):
-    """
-    Crop contour to bounding box + padding.
-    """
     x, y, w, h = cv2.boundingRect(contour)
 
     x1 = max(0, x - pad)
@@ -171,9 +238,6 @@ def render_preview_png(
     crop_to_subject: bool = False,
     pad: int = 30,
 ) -> bytes:
-    """
-    Draw contour as black stroke on white background.
-    """
     if crop_to_subject:
         contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
 
@@ -211,16 +275,8 @@ def render_debug_png(
     thickness: int = 2,
     upscale: int = 4,
 ) -> bytes:
-    """
-    Returns one debug image with 4 panels:
-    1) original over checkerboard
-    2) binary mask
-    3) contour on white
-    4) final stroke
-    """
     h, w = rgba.shape[:2]
 
-    # panel 1: original over checkerboard
     checker = np.zeros((h, w, 3), dtype=np.uint8)
     tile = 20
     for y in range(0, h, tile):
@@ -233,14 +289,11 @@ def render_debug_png(
     checker_f = checker.astype(np.float32)
     panel1 = (rgb * alpha + checker_f * (1 - alpha)).astype(np.uint8)
 
-    # panel 2: mask
     panel2 = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
-    # panel 3: contour
     panel3 = np.full((h, w, 3), 255, dtype=np.uint8)
     cv2.drawContours(panel3, [contour], -1, (0, 0, 255), 2, lineType=cv2.LINE_AA)
 
-    # panel 4: final
     final_png = render_preview_png(
         contour=contour,
         width=w,
@@ -281,9 +334,6 @@ def contour_to_svg(
     crop_to_subject: bool = False,
     pad: int = 30,
 ) -> str:
-    """
-    Convert contour to SVG path.
-    """
     if crop_to_subject:
         contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
 
@@ -313,8 +363,10 @@ async def alpha_preview(
     file: UploadFile = File(...),
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
-    epsilon_ratio: float = Query(0.001, ge=0.0003, le=0.02),
-    smooth_window: int = Query(15, ge=5, le=51),
+    epsilon_ratio: float = Query(0.001, ge=0.0001, le=0.02),
+    face_window: int = Query(7, ge=3, le=31),
+    rest_window: int = Query(25, ge=5, le=61),
+    face_ratio: float = Query(0.22, ge=0.05, le=0.5),
     thickness: int = Query(2, ge=1, le=8),
     upscale: int = Query(4, ge=1, le=8),
     crop_to_subject: bool = Query(True),
@@ -333,7 +385,9 @@ async def alpha_preview(
         contour = get_smoothed_outer_contour(
             mask,
             epsilon_ratio=epsilon_ratio,
-            smooth_window=smooth_window,
+            face_window=face_window,
+            rest_window=rest_window,
+            face_ratio=face_ratio,
         )
 
         png = render_preview_png(
@@ -357,8 +411,10 @@ async def alpha_debug(
     file: UploadFile = File(...),
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
-    epsilon_ratio: float = Query(0.001, ge=0.0003, le=0.02),
-    smooth_window: int = Query(15, ge=5, le=51),
+    epsilon_ratio: float = Query(0.001, ge=0.0001, le=0.02),
+    face_window: int = Query(7, ge=3, le=31),
+    rest_window: int = Query(25, ge=5, le=61),
+    face_ratio: float = Query(0.22, ge=0.05, le=0.5),
     thickness: int = Query(2, ge=1, le=8),
     upscale: int = Query(4, ge=1, le=8),
 ):
@@ -374,7 +430,9 @@ async def alpha_debug(
         contour = get_smoothed_outer_contour(
             mask,
             epsilon_ratio=epsilon_ratio,
-            smooth_window=smooth_window,
+            face_window=face_window,
+            rest_window=rest_window,
+            face_ratio=face_ratio,
         )
 
         png = render_debug_png(
@@ -390,43 +448,16 @@ async def alpha_debug(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
-def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
-    """
-    Read uploaded PNG with transparency correctly.
-    """
-
-    data = upload.file.read()
-
-    if not data:
-        raise ValueError("Empty file")
-
-    # decode image with OpenCV
-    arr = np.frombuffer(data, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-
-    if img is None:
-        raise ValueError("Could not decode image")
-
-    # ensure image has alpha
-    if img.shape[2] == 3:
-        alpha = np.full((img.shape[0], img.shape[1], 1), 255, dtype=np.uint8)
-        img = np.concatenate([img, alpha], axis=2)
-
-    if img.shape[2] != 4:
-        raise ValueError("Image must have 4 channels")
-
-    # convert BGRA → RGBA
-    rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-
-    return rgba
 
 @app.post("/alpha/svg")
 async def alpha_svg(
     file: UploadFile = File(...),
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
-    epsilon_ratio: float = Query(0.001, ge=0.0003, le=0.02),
-    smooth_window: int = Query(15, ge=5, le=51),
+    epsilon_ratio: float = Query(0.001, ge=0.0001, le=0.02),
+    face_window: int = Query(7, ge=3, le=31),
+    rest_window: int = Query(25, ge=5, le=61),
+    face_ratio: float = Query(0.22, ge=0.05, le=0.5),
     stroke_width: float = Query(2.0, ge=0.5, le=10.0),
     crop_to_subject: bool = Query(True),
     pad: int = Query(30, ge=0, le=300),
@@ -444,7 +475,9 @@ async def alpha_svg(
         contour = get_smoothed_outer_contour(
             mask,
             epsilon_ratio=epsilon_ratio,
-            smooth_window=smooth_window,
+            face_window=face_window,
+            rest_window=rest_window,
+            face_ratio=face_ratio,
         )
 
         svg = contour_to_svg(
