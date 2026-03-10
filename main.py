@@ -47,26 +47,40 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
     return resized
 
 
-def open_contour_at_bottom(contour: np.ndarray, height: int, bleed: int = 40) -> np.ndarray:
+def open_contour_at_bottom(contour: np.ndarray, height: int, bleed: int = 0) -> np.ndarray:
     """
-    Open contour at bottom and force both ends to drop vertically below canvas.
-    This removes the visible bottom closing line and avoids diagonal tails.
+    Open contour at the bottom by finding left/right exit points in the bottom band.
+    Both endpoints are forced to the exact same bottom y.
     """
     pts = contour[:, 0, :].astype(np.int32)
 
+    # Find points close to the bottom of the shape
     ys = pts[:, 1]
-    idx_sorted = np.argsort(ys)[::-1]
+    max_y = ys.max()
 
-    i1 = idx_sorted[0]
-    i2 = idx_sorted[1]
+    # bottom band = points within 20 px of lowest contour area
+    band = np.where(ys >= max_y - 20)[0]
+    if len(band) < 2:
+        band = np.where(ys >= max_y - 5)[0]
+
+    if len(band) < 2:
+        # fallback
+        idx_sorted = np.argsort(ys)[::-1]
+        i1, i2 = idx_sorted[0], idx_sorted[1]
+    else:
+        # choose leftmost and rightmost point in bottom band
+        xs_band = pts[band, 0]
+        i1 = band[np.argmin(xs_band)]
+        i2 = band[np.argmax(xs_band)]
 
     a, b = sorted([i1, i2])
 
-    open_pts = np.vstack([pts[b:], pts[:a+1]])
+    # open contour between the bottom left/right points
+    open_pts = np.vstack([pts[b:], pts[:a + 1]])
 
-    bottom_y = height + bleed
+    # force both ends exactly to bottom
+    bottom_y = height - 1 + bleed
 
-    # make both ends vertical by locking x to neighbour points
     if len(open_pts) >= 2:
         open_pts[0, 0] = open_pts[1, 0]
         open_pts[-1, 0] = open_pts[-2, 0]
@@ -75,7 +89,21 @@ def open_contour_at_bottom(contour: np.ndarray, height: int, bleed: int = 40) ->
     open_pts[-1, 1] = bottom_y
 
     return open_pts.reshape(-1, 1, 2)
-    
+
+
+def anchor_contour_to_bottom(contour: np.ndarray, height: int) -> np.ndarray:
+    """
+    Move contour so its lowest point sits exactly on the canvas bottom.
+    """
+    pts = contour[:, 0, :]
+
+    lowest_y = pts[:,1].max()
+    shift = (height - 1) - lowest_y
+
+    pts[:,1] = pts[:,1] + shift
+
+    return contour
+
 
 def read_upload_to_rgba(
     upload: UploadFile,
@@ -216,7 +244,7 @@ def render_preview_png(
         contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
 
     # open contour at bottom
-    contour = open_contour_at_bottom(contour, height=height, bleed=40)
+    contour = open_contour_at_bottom(contour, height=height, bleed=0)
 
     W = width * upscale
     H = height * upscale
@@ -314,7 +342,7 @@ def contour_to_svg(
     if crop_to_subject:
         contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
 
-    contour = open_contour_at_bottom(contour, height=height, bleed=40)
+    contour = open_contour_at_bottom(contour, height=height, bleed=0)
 
     pts = contour[:, 0, :]
 
