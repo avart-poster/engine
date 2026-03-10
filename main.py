@@ -240,6 +240,7 @@ def render_preview_png(
     crop_to_subject: bool = False,
     pad: int = 30,
 ) -> bytes:
+
     if crop_to_subject:
         contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
 
