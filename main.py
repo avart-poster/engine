@@ -46,6 +46,31 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
     resized = cv2.resize(rgba, (new_w, new_h), interpolation=cv2.INTER_AREA)
     return resized
 
+def open_contour_at_bottom(contour: np.ndarray, height: int, bleed: int = 40) -> np.ndarray:
+    """
+    Open a closed contour at the bottom so the closing line is not visible.
+    The two lowest points are moved below the canvas.
+    """
+    pts = contour[:, 0, :].astype(np.int32)
+
+    # find two lowest points
+    ys = pts[:, 1]
+    idx_sorted = np.argsort(ys)[::-1]  # descending
+    i1 = idx_sorted[0]
+    i2 = idx_sorted[1]
+
+    # make order stable
+    a, b = sorted([i1, i2])
+
+    # cut contour between the two bottom points
+    open_pts = np.vstack([pts[b:], pts[:a+1]])
+
+    # push first and last point below canvas
+    open_pts[0, 1] = height + bleed
+    open_pts[-1, 1] = height + bleed
+
+    return open_pts.reshape(-1, 1, 2)
+    
 
 def read_upload_to_rgba(
     upload: UploadFile,
@@ -185,21 +210,24 @@ def render_preview_png(
     if crop_to_subject:
         contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
 
+    # open contour at bottom
+    contour = open_contour_at_bottom(contour, height=height, bleed=40)
+
     W = width * upscale
     H = height * upscale
 
     canvas = np.full((H, W, 3), 255, dtype=np.uint8)
 
-    c = contour.copy().astype(np.int32)
-    c[:, 0, 0] *= upscale
-    c[:, 0, 1] *= upscale
+    pts = contour.copy().astype(np.int32)
+    pts[:, 0, 0] *= upscale
+    pts[:, 0, 1] *= upscale
 
-    cv2.drawContours(
+    cv2.polylines(
         canvas,
-        [c],
-        -1,
-        (0, 0, 0),
-        thickness=max(1, thickness * upscale),
+        [pts],
+        isClosed=False,
+        color=(0, 0, 0),
+        thickness=max(1, int(round(thickness * upscale))),
         lineType=cv2.LINE_AA,
     )
 
@@ -278,11 +306,10 @@ def contour_to_svg(
     crop_to_subject: bool = False,
     pad: int = 30,
 ) -> str:
-    """
-    Smooth SVG path using quadratic curves.
-    """
     if crop_to_subject:
         contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
+
+    contour = open_contour_at_bottom(contour, height=height, bleed=40)
 
     pts = contour[:, 0, :]
 
@@ -294,17 +321,17 @@ def contour_to_svg(
 
     d = []
 
-    for i in range(len(pts)):
+    for i in range(len(pts) - 1):
         p0 = pts[i]
-        p1 = pts[(i + 1) % len(pts)]
+        p1 = pts[i + 1]
         mx, my = midpoint(p0, p1)
 
         if i == 0:
-            d.append(f"M {mx:.2f} {my:.2f}")
+            d.append(f"M {p0[0]:.2f} {p0[1]:.2f}")
+            d.append(f"Q {p0[0]:.2f} {p0[1]:.2f} {mx:.2f} {my:.2f}")
         else:
             d.append(f"Q {p0[0]:.2f} {p0[1]:.2f} {mx:.2f} {my:.2f}")
 
-    d.append("Z")
     path = " ".join(d)
 
     svg = f'''<?xml version="1.0" encoding="UTF-8"?>
