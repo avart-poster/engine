@@ -46,28 +46,31 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
     resized = cv2.resize(rgba, (new_w, new_h), interpolation=cv2.INTER_AREA)
     return resized
 
+
 def open_contour_at_bottom(contour: np.ndarray, height: int, bleed: int = 40) -> np.ndarray:
     """
-    Open a closed contour at the bottom so the closing line is not visible.
-    The two lowest points are moved below the canvas.
+    Open contour at bottom and force both ends to same bottom level.
     """
+
     pts = contour[:, 0, :].astype(np.int32)
 
     # find two lowest points
     ys = pts[:, 1]
-    idx_sorted = np.argsort(ys)[::-1]  # descending
+    idx_sorted = np.argsort(ys)[::-1]
+
     i1 = idx_sorted[0]
     i2 = idx_sorted[1]
 
-    # make order stable
     a, b = sorted([i1, i2])
 
-    # cut contour between the two bottom points
+    # open contour between bottom points
     open_pts = np.vstack([pts[b:], pts[:a+1]])
 
-    # push first and last point below canvas
-    open_pts[0, 1] = height + bleed
-    open_pts[-1, 1] = height + bleed
+    # force both endpoints to exact bottom
+    bottom_y = height + bleed
+
+    open_pts[0, 1] = bottom_y
+    open_pts[-1, 1] = bottom_y
 
     return open_pts.reshape(-1, 1, 2)
     
