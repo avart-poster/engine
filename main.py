@@ -49,41 +49,30 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
 
 def open_contour_at_bottom(contour: np.ndarray, height: int, bleed: int = 0) -> np.ndarray:
     """
-    Open contour at the bottom by finding left/right exit points in the bottom band.
-    Both endpoints are forced to the exact same bottom y.
+    Open contour at bottom by cutting between left/right bottom points
+    and placing both endpoints exactly on the bottom line.
     """
     pts = contour[:, 0, :].astype(np.int32)
 
-    # Find points close to the bottom of the shape
     ys = pts[:, 1]
     max_y = ys.max()
 
-    # bottom band = points within 20 px of lowest contour area
-    band = np.where(ys >= max_y - 20)[0]
+    # points close to the bottom (band)
+    band = np.where(ys >= max_y - 15)[0]
     if len(band) < 2:
         band = np.where(ys >= max_y - 5)[0]
 
-    if len(band) < 2:
-        # fallback
-        idx_sorted = np.argsort(ys)[::-1]
-        i1, i2 = idx_sorted[0], idx_sorted[1]
-    else:
-        # choose leftmost and rightmost point in bottom band
-        xs_band = pts[band, 0]
-        i1 = band[np.argmin(xs_band)]
-        i2 = band[np.argmax(xs_band)]
+    # choose leftmost and rightmost in bottom band
+    xs = pts[band, 0]
+    i_left = band[np.argmin(xs)]
+    i_right = band[np.argmax(xs)]
 
-    a, b = sorted([i1, i2])
+    a, b = sorted([i_left, i_right])
 
-    # open contour between the bottom left/right points
+    # open contour between them
     open_pts = np.vstack([pts[b:], pts[:a + 1]])
 
-    # force both ends exactly to bottom
     bottom_y = height - 1 + bleed
-
-    if len(open_pts) >= 2:
-        open_pts[0, 0] = open_pts[1, 0]
-        open_pts[-1, 0] = open_pts[-2, 0]
 
     open_pts[0, 1] = bottom_y
     open_pts[-1, 1] = bottom_y
