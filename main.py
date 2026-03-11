@@ -384,6 +384,7 @@ viewBox="0 0 {width} {height}">
     stroke-linejoin="round"/>
 </svg>
 '''
+
     return svg
 
 
