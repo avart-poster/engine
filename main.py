@@ -429,7 +429,7 @@ def generate_poster_pdf(svg_string: str, name: str) -> bytes:
     drawing.height *= scale
 
     x = (width - drawing.width) / 2
-    y = (height - drawing.height) / 2 - 30
+    y = (height - drawing.height) / 2 - 10
 
     c.saveState()
     c.translate(x, y)
