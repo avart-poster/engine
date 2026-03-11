@@ -623,4 +623,19 @@ async def poster_pdf(
         svg = contour_to_svg(
             contour=contour,
             width=w,
-            height=h
+            height=h,
+            stroke_width=stroke_width,
+            crop_to_subject=crop_to_subject,
+            pad=pad,
+        )
+
+pdf_bytes = generate_poster_pdf(svg, name)
+
+return Response(
+    content=pdf_bytes,
+    media_type="application/pdf",
+    headers={"Content-Disposition": 'attachment; filename="poster.pdf"'},
+)
+
+except Exception as e:
+    return JSONResponse({"error": str(e)}, status_code=400)
