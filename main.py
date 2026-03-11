@@ -420,16 +420,24 @@ def generate_poster_pdf(svg_string: str, name: str) -> bytes:
     c.setFont(TITLE_FONT, 35)
     c.drawCentredString(width / 2, height - 60, name)
 
-    # silhouette placement
+        # silhouette placement
     scale = min(
         (width * 0.72) / drawing.width,
         (height * 0.62) / drawing.height,
     )
+
     drawing.width *= scale
     drawing.height *= scale
+    drawing.scale(scale, scale)
 
-    x = (width - drawing.width) / 2
-    y = (height - drawing.height) / 2 - 10
+    bounds = drawing.getBounds()
+    min_x, min_y, max_x, max_y = bounds
+
+    drawing_w = max_x - min_x
+    drawing_h = max_y - min_y
+
+    x = (width - drawing_w) / 2 - min_x
+    y = (height - drawing_h) / 2 - min_y - 10
 
     c.saveState()
     c.translate(x, y)
