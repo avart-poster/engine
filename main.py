@@ -2,13 +2,23 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+import tempfile
+
 from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 
-pdfmetrics.registerFont(TTFont("TheSeasonsBold", "fonts/TheSeasons-Bold.otf"))
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A3
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.graphics import renderPDF
 
-assets/avart-logo.svg
+from svglib.svglib import svg2rlg
+
+# register custom font
+pdfmetrics.registerFont(TTFont("TheSeasonsBold", "fonts/TheSeasons-Bold.otf"))
 
 app = FastAPI(
     title="avart-engine",
