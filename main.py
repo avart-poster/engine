@@ -6,6 +6,10 @@ from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 
+pdfmetrics.registerFont(TTFont("TheSeasonsBold", "fonts/TheSeasons-Bold.otf"))
+
+assets/avart-logo.svg
+
 app = FastAPI(
     title="avart-engine",
     version="0.9.0",
@@ -45,6 +49,24 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
 
     resized = cv2.resize(rgba, (new_w, new_h), interpolation=cv2.INTER_AREA)
     return resized
+    
+
+def draw_svg_on_pdf(c, svg_path: str, x: float, y: float, max_width: float, max_height: float):
+    drawing = svg2rlg(svg_path)
+
+    if drawing is None:
+        raise ValueError(f"Could not load SVG: {svg_path}")
+
+    scale = min(
+        max_width / drawing.width,
+        max_height / drawing.height
+    )
+
+    c.saveState()
+    c.translate(x, y)
+    c.scale(scale, scale)
+    renderPDF.draw(drawing, c, 0, 0)
+    c.restoreState()
 
 
 def open_contour_at_bottom(contour: np.ndarray, height: int, bleed: int = 0) -> np.ndarray:
@@ -539,7 +561,7 @@ def generate_poster_pdf(svg_string: str, name: str) -> bytes:
 
     # navn
     c.setFillColorRGB(0,0,0)
-    c.setFont("Helvetica", 28)
+    c.setFont("TheSeasonsBold", 35)
     c.drawCentredString(width/2, height-60, name)
 
         # placer silhouette - intelligent scale
@@ -559,9 +581,20 @@ def generate_poster_pdf(svg_string: str, name: str) -> bytes:
     renderPDF.draw(drawing, c, 0, 0)
     c.restoreState()
 
-    # logo
-    c.setFont("Helvetica", 18)
-    c.drawCentredString(width/2, 60, "avart")
+    # logo svg
+    logo_width = 35 * mm
+    logo_height = 12 * mm
+    logo_x = (width - logo_width) / 2
+    logo_y = 18 * mm
+
+    draw_svg_on_pdf(
+        c,
+        "assets/avart-logo.svg",
+        logo_x,
+        logo_y,
+        logo_width,
+        logo_height,
+    )
 
     c.showPage()
     c.save()
