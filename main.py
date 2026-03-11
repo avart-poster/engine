@@ -509,3 +509,60 @@ async def alpha_svg(
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A3
+from reportlab.lib.units import mm
+from svglib.svglib import svg2rlg
+from reportlab.graphics import renderPDF
+import tempfile
+
+
+def generate_poster_pdf(svg_string: str, name: str) -> bytes:
+
+    width, height = A3
+
+    tmp_svg = tempfile.NamedTemporaryFile(delete=False, suffix=".svg")
+    tmp_svg.write(svg_string.encode("utf-8"))
+    tmp_svg.close()
+
+    drawing = svg2rlg(tmp_svg.name)
+
+    buffer = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+
+    c = canvas.Canvas(buffer.name, pagesize=A3)
+
+    # baggrund
+    c.setFillColorRGB(0.95, 0.93, 0.90)
+    c.rect(0, 0, width, height, fill=1)
+
+    # navn
+    c.setFillColorRGB(0,0,0)
+    c.setFont("Helvetica", 28)
+    c.drawCentredString(width/2, height-60, name)
+
+    # placer silhouette
+    scale = 0.8
+    drawing.width *= scale
+    drawing.height *= scale
+
+    x = (width - drawing.width) / 2
+    y = (height - drawing.height) / 2 - 40
+
+    c.saveState()
+    c.translate(x, y)
+    renderPDF.draw(drawing, c, 0, 0)
+    c.restoreState()
+
+    # logo
+    c.setFont("Helvetica", 18)
+    c.drawCentredString(width/2, 60, "avart")
+
+    c.showPage()
+    c.save()
+
+    with open(buffer.name, "rb") as f:
+        pdf_bytes = f.read()
+
+    return pdf_bytes
