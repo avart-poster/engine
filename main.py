@@ -542,13 +542,17 @@ def generate_poster_pdf(svg_string: str, name: str) -> bytes:
     c.setFont("Helvetica", 28)
     c.drawCentredString(width/2, height-60, name)
 
-    # placer silhouette
-    scale = 0.8
+        # placer silhouette - intelligent scale
+    scale = min(
+        (width * 0.72) / drawing.width,
+        (height * 0.62) / drawing.height
+    )
+
     drawing.width *= scale
     drawing.height *= scale
 
     x = (width - drawing.width) / 2
-    y = (height - drawing.height) / 2 - 40
+    y = (height - drawing.height) / 2 - 30
 
     c.saveState()
     c.translate(x, y)
@@ -566,3 +570,53 @@ def generate_poster_pdf(svg_string: str, name: str) -> bytes:
         pdf_bytes = f.read()
 
     return pdf_bytes
+
+
+@app.post("/poster/pdf")
+async def poster_pdf(
+    file: UploadFile = File(...),
+    name: str = Query("Clara & Ellinor"),
+    max_dimension: int = Query(MAX_DIMENSION, ge=600, le=3000),
+    alpha_threshold: int = Query(1, ge=0, le=255),
+    smooth: bool = Query(True),
+    epsilon_ratio: float = Query(0.00045, ge=0.00005, le=0.02),
+    smooth_window: int = Query(9, ge=3, le=51),
+    stroke_width: float = Query(3.5, ge=0.5, le=12.0),
+    crop_to_subject: bool = Query(True),
+    pad: int = Query(30, ge=0, le=300),
+):
+    try:
+        rgba = read_upload_to_rgba(file, max_dimension=max_dimension)
+        h, w = rgba.shape[:2]
+
+        mask = alpha_to_mask(
+            rgba,
+            alpha_threshold=alpha_threshold,
+            smooth=smooth,
+        )
+
+        contour = get_smoothed_outer_contour(
+            mask,
+            epsilon_ratio=epsilon_ratio,
+            smooth_window=smooth_window,
+        )
+
+        svg = contour_to_svg(
+            contour=contour,
+            width=w,
+            height=h,
+            stroke_width=stroke_width,
+            crop_to_subject=crop_to_subject,
+            pad=pad,
+        )
+
+        pdf_bytes = generate_poster_pdf(svg, name)
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="poster.pdf"'},
+        )
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
