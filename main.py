@@ -666,7 +666,7 @@ async def poster_pdf(
             pad=pad,
         )
 
-        pdf_bytes = generate_poster_pdf(svg, name, page_w_mm, page_h_mm)
+        pdf_bytes = generate_poster_pdf(svg, name)
 
         return Response(
             content=pdf_bytes,
