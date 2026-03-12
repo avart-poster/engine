@@ -86,6 +86,45 @@ def health():
 # Helpers
 # --------------------------------------------------
 
+def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIMENSION) -> np.ndarray:
+    data = upload.file.read()
+    if not data:
+        raise ValueError("Empty file")
+
+    arr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        raise ValueError("Could not decode image")
+
+    # Hvis billedet allerede har alpha og faktisk transparency, så brug det direkte
+    if len(img.shape) == 3 and img.shape[2] == 4:
+        alpha = img[:, :, 3]
+        if np.any(alpha < 250):
+            rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+            return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
+
+    # Ellers: fjern baggrund med rembg
+    output = remove(data)
+
+    arr_out = np.frombuffer(output, np.uint8)
+    img_out = cv2.imdecode(arr_out, cv2.IMREAD_UNCHANGED)
+
+    if img_out is None:
+        raise ValueError("Background removal failed")
+
+    if len(img_out.shape) == 3 and img_out.shape[2] == 3:
+        alpha = np.full((img_out.shape[0], img_out.shape[1], 1), 255, dtype=np.uint8)
+        img_out = np.concatenate([img_out, alpha], axis=2)
+
+    if len(img_out.shape) != 3 or img_out.shape[2] != 4:
+        raise ValueError("Background removal did not return RGBA")
+
+    rgba = cv2.cvtColor(img_out, cv2.COLOR_BGRA2RGBA)
+    return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
+
+
+
 def anchor_contour_to_bottom(contour: np.ndarray, height: int) -> np.ndarray:
     pts = contour[:, 0, :].astype(np.float32)
 
@@ -524,7 +563,7 @@ async def alpha_preview(
     pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        rgba = read_upload_to_rgba(file, max_dimension=max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension=max_dimension)
         h, w = rgba.shape[:2]
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
@@ -563,7 +602,7 @@ async def alpha_debug(
     upscale: int = Query(4, ge=1, le=8),
 ):
     try:
-        rgba = read_upload_to_rgba(file, max_dimension=max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension=max_dimension)
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
 
@@ -600,7 +639,7 @@ async def alpha_svg(
     pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        rgba = read_upload_to_rgba(file, max_dimension=max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension=max_dimension)
         h, w = rgba.shape[:2]
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
@@ -646,7 +685,7 @@ async def poster_pdf(
     pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        rgba = read_upload_to_rgba(file, max_dimension=max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension=max_dimension)
         h, w = rgba.shape[:2]
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
