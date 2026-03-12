@@ -387,7 +387,6 @@ viewBox="0 0 {width} {height}">
 
     return svg
 
-
 def draw_svg_on_pdf(
     pdf_canvas,
     svg_path: str,
