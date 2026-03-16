@@ -6,5 +6,5 @@ python-multipart
 Pillow
 reportlab
 svglib
-rembg
+rembg[cpu]
 onnxruntime
