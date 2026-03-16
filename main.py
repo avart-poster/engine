@@ -574,7 +574,7 @@ async def alpha_preview(
     pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        rgba = remove_background_if_needed(upload, max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension)
         h, w = rgba.shape[:2]
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
@@ -613,7 +613,7 @@ async def alpha_debug(
     upscale: int = Query(4, ge=1, le=8),
 ):
     try:
-        rgba = remove_background_if_needed(upload, max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension)
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
 
@@ -650,7 +650,7 @@ async def alpha_svg(
     pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        rgba = remove_background_if_needed(upload, max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension)
         h, w = rgba.shape[:2]
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
@@ -696,7 +696,7 @@ async def poster_pdf(
     pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        rgba = remove_background_if_needed(upload, max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension)
         h, w = rgba.shape[:2]
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
