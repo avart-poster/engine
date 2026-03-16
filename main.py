@@ -163,11 +163,11 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
     return cv2.resize(rgba, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
 
-def read_upload_to_rgba(upload: UploadFile, max_dimension: int = MAX_DIMENSION) -> np.ndarray:
-    data = await upload.read()
+def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIMENSION) -> np.ndarray:
 
-if not data:
-    raise ValueError("Empty file")
+    data = upload.file.read()
+    if not data:
+        raise ValueError("Empty file")
 
     arr = np.frombuffer(data, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
