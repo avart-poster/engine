@@ -5,7 +5,7 @@ import tempfile
 
 import cv2
 import numpy as np
-from rembg import remove
+from rembg import remove, new_session
 from fastapi import FastAPI, File, UploadFile, Query
 
 
