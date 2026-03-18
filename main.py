@@ -162,9 +162,17 @@ async def poster_pdf(
         h, w = rgba.shape[:2]
 
         svg = contour_to_svg(contour, w, h, stroke_width)
-        pdf = generate_poster(svg, name)
 
-        return Response(content=pdf, media_type="text/html")
+        # 🔥 generate PDF (skal returnere bytes!)
+        pdf_bytes = generate_poster(svg, name)
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{name}.pdf"'
+            }
+        )
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
