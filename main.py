@@ -114,20 +114,22 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
             rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
             return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
 
-# Resize FØR rembg (MEGET vigtigt)
-max_input_size = 1000  # <- justér evt 800-1200
+    # Resize FØR rembg
+    max_input_size = 1000
 
-h, w = img.shape[:2]
-scale = min(1.0, max_input_size / max(h, w))
+    h, w = img.shape[:2]
+    scale = min(1.0, max_input_size / max(h, w))
 
-if scale < 1.0:
-    new_w = int(w * scale)
-    new_h = int(h * scale)
-    img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    _, buffer = cv2.imencode(".png", img)
-    data = buffer.tobytes()
-    
-    # Ellers: fjern baggrund med rembg
+    if scale < 1.0:
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        ok, buffer = cv2.imencode(".png", img)
+        if not ok:
+            raise ValueError("Could not encode resized image")
+        data = buffer.tobytes()
+
+    # Fjern baggrund med rembg
     output = remove(data, session=get_rembg_session())
 
     arr_out = np.frombuffer(output, np.uint8)
@@ -145,7 +147,6 @@ if scale < 1.0:
 
     rgba = cv2.cvtColor(img_out, cv2.COLOR_BGRA2RGBA)
     return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
-
 
 def anchor_contour_to_bottom(contour: np.ndarray, height: int) -> np.ndarray:
     pts = contour[:, 0, :].astype(np.float32)
