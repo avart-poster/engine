@@ -96,7 +96,6 @@ def get_rembg_session():
         _rembg_session = new_session(REMBG_MODEL)
     return _rembg_session
 
-
 def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIMENSION) -> np.ndarray:
     data = upload.file.read()
     if not data:
@@ -133,7 +132,6 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
 
     rgba = cv2.cvtColor(img_out, cv2.COLOR_BGRA2RGBA)
     return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
-
 
 
 def anchor_contour_to_bottom(contour: np.ndarray, height: int) -> np.ndarray:
