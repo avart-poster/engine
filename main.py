@@ -107,16 +107,15 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
     if img is None:
         raise ValueError("Could not decode image")
 
-    # Hvis billedet allerede har alpha og faktisk transparency, så brug det direkte
+    # Hvis billedet allerede har alpha og transparency
     if len(img.shape) == 3 and img.shape[2] == 4:
         alpha = img[:, :, 3]
         if np.any(alpha < 250):
             rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
             return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
 
-    # Resize FØR rembg
+    # Resize før rembg
     max_input_size = 1600
-
     h, w = img.shape[:2]
     scale = min(1.0, max_input_size / max(h, w))
 
@@ -124,12 +123,14 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
         new_w = int(w * scale)
         new_h = int(h * scale)
         img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
         ok, buffer = cv2.imencode(".png", img)
         if not ok:
             raise ValueError("Could not encode resized image")
+
         data = buffer.tobytes()
 
-    # Fjern baggrund med rembg
+    # Fjern baggrund
     output = remove(data, session=get_rembg_session())
 
     arr_out = np.frombuffer(output, np.uint8)
@@ -144,6 +145,21 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
 
     if len(img_out.shape) != 3 or img_out.shape[2] != 4:
         raise ValueError("Background removal did not return RGBA")
+
+    # Ekstra bund
+    bottom_pad = 180
+    img_out = cv2.copyMakeBorder(
+        img_out,
+        0,
+        bottom_pad,
+        0,
+        0,
+        cv2.BORDER_CONSTANT,
+        value=(0, 0, 0, 0)
+    )
+
+    rgba = cv2.cvtColor(img_out, cv2.COLOR_BGRA2RGBA)
+    return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
 
 
     # Tilføj ekstra transparent bund, så contour kan gå helt ned
