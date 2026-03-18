@@ -131,14 +131,24 @@ def contour_to_svg(contour, width, height, stroke_width=3):
 
 
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Spacer
+from reportlab.platypus import SimpleDocTemplate, Spacer, Paragraph
 from reportlab.platypus import Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib import colors
 import io
 import cairosvg
 
 
-def generate_poster(svg_string: str, name: str) -> bytes:
+def generate_poster(
+    svg_string: str,
+    name: str,
+    bg_color: str = "#e9e3db",
+    margin_mm: int = 20,
+    logo_path: str = None,
+) -> bytes:
+
+    # SVG → PNG
     png_bytes = cairosvg.svg2png(bytestring=svg_string.encode("utf-8"))
 
     buffer = io.BytesIO()
@@ -146,21 +156,44 @@ def generate_poster(svg_string: str, name: str) -> bytes:
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=20,
-        rightMargin=20,
-        topMargin=40,
-        bottomMargin=40,
+        leftMargin=margin_mm * mm,
+        rightMargin=margin_mm * mm,
+        topMargin=margin_mm * mm,
+        bottomMargin=margin_mm * mm,
     )
 
+    styles = getSampleStyleSheet()
     elements = []
 
-    img_buffer = io.BytesIO(png_bytes)
-    img = RLImage(img_buffer, width=150*mm, height=150*mm)
-    elements.append(img)
-
+    # 🔤 NAVN (top)
+    title = Paragraph(f"<b>{name}</b>", styles["Title"])
+    elements.append(title)
     elements.append(Spacer(1, 20))
 
-    doc.build(elements)
+    # 🖼️ BILLEDE (auto scale)
+    img_buffer = io.BytesIO(png_bytes)
+    img = RLImage(img_buffer)
+
+    max_width = 160 * mm
+    max_height = 200 * mm
+
+    img.drawWidth = max_width
+    img.drawHeight = max_height
+
+    elements.append(img)
+    elements.append(Spacer(1, 20))
+
+    # 🪵 LOGO (bund)
+    if logo_path:
+        logo = RLImage(logo_path, width=40*mm, height=15*mm)
+        elements.append(logo)
+
+    # 🎨 BAGGRUND (hack via canvas)
+    def draw_bg(canvas, doc):
+        canvas.setFillColor(colors.HexColor(bg_color))
+        canvas.rect(0, 0, A4[0], A4[1], fill=1)
+
+    doc.build(elements, onFirstPage=draw_bg, onLaterPages=draw_bg)
 
     pdf = buffer.getvalue()
     buffer.close()
