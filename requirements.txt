@@ -3,9 +3,8 @@ uvicorn
 numpy
 opencv-python-headless
 python-multipart
-Pillow
 reportlab
 svglib
 rembg[cpu]
 onnxruntime
-cairosvg
+pillow
