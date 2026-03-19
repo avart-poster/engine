@@ -341,6 +341,15 @@ def render_preview_png(
     return png.tobytes()
 
 
+def set_stroke_width_recursive(node, stroke_width: float):
+    if hasattr(node, "strokeWidth"):
+        node.strokeWidth = stroke_width
+
+    if hasattr(node, "contents"):
+        for child in node.contents:
+            set_stroke_width_recursive(child, stroke_width)
+
+
 def render_debug_png(
     rgba: np.ndarray,
     mask: np.ndarray,
@@ -403,7 +412,7 @@ def contour_to_svg(
     contour: np.ndarray,
     width: int,
     height: int,
-    stroke_width: float = 3.5,
+    stroke-width="{stroke_width}"
     crop_to_subject: bool = False,
     pad: int = 30,
 ) -> str:
@@ -446,7 +455,7 @@ viewBox="0 0 {width} {height}">
     return svg
 
 
-def generate_poster_pdf(svg_string: str, name: str) -> bytes:
+def generate_poster_pdf(svg_string: str, name: str, stroke_width: float = DEFAULT_STROKE_WIDTH) -> bytes:
     width = PAGE_W_MM * mm
     height = PAGE_H_MM * mm
 
@@ -487,7 +496,11 @@ def generate_poster_pdf(svg_string: str, name: str) -> bytes:
         (width * 0.82) / raw_w,
         (silhouette_height * 0.98) / raw_h,
     )
+
     drawing.scale(silhouette_scale, silhouette_scale)
+
+    # 🔥 vigtigt!
+    set_stroke_width_recursive(drawing, stroke_width / silhouette_scale)
 
     min_x, min_y, max_x, max_y = drawing.getBounds()
     draw_w = max_x - min_x
@@ -699,7 +712,7 @@ async def poster_pdf(
             pad=pad,
         )
 
-        pdf_bytes = generate_poster_pdf(svg, name)
+        pdf_bytes = generate_poster_pdf(svg, name, stroke_width=stroke_width)
 
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
