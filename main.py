@@ -221,36 +221,25 @@ def smooth_contour_points(points: np.ndarray, smooth_window: int = 9) -> np.ndar
 
 def get_smoothed_outer_contour(
     mask: np.ndarray,
-    epsilon_ratio: float = 0.00035,
-    smooth_window: int = 11,
+    epsilon_ratio: float = 0.00025,
+    smooth_window: int = 17,
 ) -> np.ndarray:
+    mask_blur = cv2.GaussianBlur(mask, (9, 9), 0)
 
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
+    contours, _ = cv2.findContours(mask_blur, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         raise ValueError("No contour found")
 
     largest = max(contours, key=cv2.contourArea)
-
-    # 🔹 STEP 1: stærkere blur af mask (glatter kant før contour)
-    mask_blur = cv2.GaussianBlur(mask, (9, 9), 0)
-
-    contours, _ = cv2.findContours(mask_blur, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    largest = max(contours, key=cv2.contourArea)
-
     points = largest[:, 0, :].astype(np.float32)
 
-    # 🔹 STEP 2: smoothing
     smoothed = smooth_contour_points(points, smooth_window=smooth_window)
-
     smoothed_contour = np.round(smoothed).astype(np.int32).reshape(-1, 1, 2)
 
-    # 🔹 STEP 3: simplificering (færre punkter)
     peri = cv2.arcLength(smoothed_contour, True)
     eps = max(0.5, peri * epsilon_ratio)
 
     simplified = cv2.approxPolyDP(smoothed_contour, eps, True)
-
     return simplified
 
 
@@ -544,7 +533,7 @@ async def alpha_preview(
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.00045, ge=0.00005, le=0.02),
-    smooth_window: int = Query(9, ge=3, le=51),
+    smooth_window: int = Query(17, ge=3, le=51),
     thickness: int = Query(2, ge=1, le=12),
     upscale: int = Query(4, ge=1, le=8),
     crop_to_subject: bool = Query(True),
@@ -585,7 +574,7 @@ async def alpha_debug(
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.00045, ge=0.00005, le=0.02),
-    smooth_window: int = Query(9, ge=3, le=51),
+    smooth_window: int = Query(17, ge=3, le=51),
     thickness: int = Query(2, ge=1, le=12),
     upscale: int = Query(4, ge=1, le=8),
 ):
@@ -621,7 +610,7 @@ async def alpha_svg(
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.00045, ge=0.00005, le=0.02),
-    smooth_window: int = Query(9, ge=3, le=51),
+    smooth_window: int = Query(17, ge=3, le=51),
     stroke_width: float = Query(3.5, ge=0.5, le=12.0),
     crop_to_subject: bool = Query(True),
     pad: int = Query(30, ge=0, le=300),
@@ -678,7 +667,7 @@ async def poster_pdf(
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.00045, ge=0.00005, le=0.02),
-    smooth_window: int = Query(9, ge=3, le=51),
+    smooth_window: int = Query(17, ge=3, le=51),
     stroke_width: float = Query(3.5, ge=0.5, le=12.0),
     crop_to_subject: bool = Query(True),
     pad: int = Query(30, ge=0, le=300),
