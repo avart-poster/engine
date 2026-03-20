@@ -526,14 +526,13 @@ silhouette_scale = min(
 
 drawing.scale(silhouette_scale, silhouette_scale)
 
-# 🔥 vigtigt!
 set_stroke_width_recursive(drawing, stroke_width / silhouette_scale)
 
-    min_x, min_y, max_x, max_y = drawing.getBounds()
-    draw_w = max_x - min_x
+min_x, min_y, max_x, max_y = drawing.getBounds()
+draw_w = max_x - min_x
 
-    x = (width - draw_w) / 2 - min_x
-    y = -min_y
+x = (width - draw_w) / 2 - min_x
+y = -min_y
 
     c.saveState()
     c.translate(x, y)
