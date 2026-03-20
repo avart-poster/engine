@@ -524,11 +524,10 @@ silhouette_scale = min(
     (silhouette_height * MAX_HEIGHT_RATIO) / raw_h,
 )
 
+drawing.scale(silhouette_scale, silhouette_scale)
 
-    drawing.scale(silhouette_scale, silhouette_scale)
-
-    # 🔥 vigtigt!
-    set_stroke_width_recursive(drawing, stroke_width / silhouette_scale)
+# 🔥 vigtigt!
+set_stroke_width_recursive(drawing, stroke_width / silhouette_scale)
 
     min_x, min_y, max_x, max_y = drawing.getBounds()
     draw_w = max_x - min_x
