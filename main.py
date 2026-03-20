@@ -712,7 +712,9 @@ async def poster_pdf(
     crop_to_subject: bool = Query(True),
     pad: int = Query(30, ge=0, le=300),
 ):
-    try:
+
+
+try:
     rgba = remove_background_if_needed(file, max_dimension=max_dimension)
     h, w = rgba.shape[:2]
 
