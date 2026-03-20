@@ -511,17 +511,13 @@ def generate_poster_pdf(
     raw_w = max_x - min_x
     raw_h = max_y - min_y
 
-    # HEAD-based scaling
-    TARGET_HEAD_RATIO = 0.50
-    MAX_HEIGHT_RATIO = 0.95
+    TARGET_HEAD_RATIO = 0.42
+    MAX_HEIGHT_RATIO = 1.50
 
     if head_width is None or head_width <= 0:
         head_width = raw_w * 0.7
 
-    silhouette_scale = min(
-        (width * TARGET_HEAD_RATIO) / head_width,
-        (silhouette_height * MAX_HEIGHT_RATIO) / raw_h,
-    )
+    silhouette_scale = (width * TARGET_HEAD_RATIO) / head_width
 
     drawing.scale(silhouette_scale, silhouette_scale)
     set_stroke_width_recursive(drawing, stroke_width / silhouette_scale)
