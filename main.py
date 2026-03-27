@@ -334,8 +334,8 @@ async def alpha_preview(
 
         contour = get_smoothed_outer_contour(
             mask,
-            epsilon_ratio=epsilon_ratio,
             smooth_window=smooth_window,
+        )
         )
 
         png = render_preview_png(
