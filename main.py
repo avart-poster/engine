@@ -293,7 +293,7 @@ def contour_to_svg(
     svg = f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect width="100%" height="100%" fill="white"/>
-  <path d="{d}" fill="none" stroke="black" stroke-width="{stroke_width}" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="{d}" fill="none" stroke="red" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>'''
     return svg
 
@@ -427,7 +427,7 @@ async def alpha_svg(
             content=svg,
             media_type="image/svg+xml",
             headers={
-                "Content-Disposition": "attachment; filename=avart.svg"
+                "Content-Disposition": "attachment; filename=avart-test-red.svg"
             },
         )
 
