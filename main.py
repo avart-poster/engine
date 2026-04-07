@@ -59,26 +59,18 @@ def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
     rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
     return rgba
 
-
 def alpha_to_mask(
     rgba: np.ndarray,
-    alpha_threshold: int = 1,
+    alpha_threshold: int = 10,
     smooth: bool = True,
 ) -> np.ndarray:
-    """
-    Convert alpha channel to binary mask:
-    subject = 255
-    background = 0
-    """
     alpha = rgba[:, :, 3]
-    mask = np.where(alpha > alpha_threshold, 255, 0).astype(np.uint8)
+
+    mask = (alpha > alpha_threshold).astype(np.uint8) * 255
 
     if smooth:
-        mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        mask = cv2.GaussianBlur(mask, (7, 7), 0)
         _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
     return mask
 
