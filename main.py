@@ -315,7 +315,6 @@ async def alpha_preview(
     file: UploadFile = File(...),
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
-    epsilon_ratio: float = Query(0.001, ge=0.0001, le=0.02),
     smooth_window: int = Query(15, ge=5, le=51),
     thickness: int = Query(2, ge=1, le=8),
     upscale: int = Query(4, ge=1, le=8),
@@ -374,7 +373,6 @@ async def alpha_debug(
 
         contour = get_smoothed_outer_contour(
             mask,
-            epsilon_ratio=epsilon_ratio,
             smooth_window=smooth_window,
         )
 
@@ -416,7 +414,6 @@ async def alpha_svg(
 
         contour = get_smoothed_outer_contour(
             mask,
-            epsilon_ratio=epsilon_ratio,
             smooth_window=smooth_window,
         )
 
