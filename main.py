@@ -395,7 +395,6 @@ async def alpha_svg(
     file: UploadFile = File(...),
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
-    epsilon_ratio: float = Query(0.001, ge=0.0001, le=0.02),
     smooth_window: int = Query(15, ge=5, le=51),
     stroke_width: float = Query(2.0, ge=0.5, le=10.0),
     crop_to_subject: bool = Query(True),
