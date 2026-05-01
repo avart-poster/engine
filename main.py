@@ -25,16 +25,22 @@ def alpha_to_mask(rgba, alpha_threshold=10, smooth=True):
     import cv2
     import numpy as np
 
-    # konverter til grayscale
     gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
 
-    # threshold (auto + inverteret så person = hvid)
+    # stærkere threshold (renere silhuet)
     _, mask = cv2.threshold(
         gray,
         0,
         255,
         cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
     )
+
+    # 🔥 NYT: fjern støj
+    kernel = np.ones((5,5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # 🔥 NYT: fjern små prikker
+    mask = cv2.medianBlur(mask, 7)
 
     if smooth:
         mask = cv2.GaussianBlur(mask, (5, 5), 0)
