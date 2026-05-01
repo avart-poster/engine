@@ -21,14 +21,23 @@ def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
     return np.array(pil)
 
 
-def alpha_to_mask(rgba: np.ndarray, alpha_threshold=10, smooth=True):
-    alpha = rgba[:, :, 3]
+def alpha_to_mask(rgba, alpha_threshold=10, smooth=True):
+    import cv2
+    import numpy as np
 
-    mask = (alpha > alpha_threshold).astype(np.uint8) * 255
+    # konverter til grayscale
+    gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
+
+    # threshold (auto + inverteret så person = hvid)
+    _, mask = cv2.threshold(
+        gray,
+        0,
+        255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )
 
     if smooth:
-        mask = cv2.GaussianBlur(mask, (7, 7), 0)
-        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+        mask = cv2.GaussianBlur(mask, (5, 5), 0)
 
     return mask
 
