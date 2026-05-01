@@ -21,29 +21,21 @@ def read_upload_to_rgba(upload: UploadFile) -> np.ndarray:
     return np.array(pil)
 
 
-def alpha_to_mask(rgba, alpha_threshold=10, smooth=True):
-    import cv2
-    import numpy as np
+def alpha_to_mask(
+    rgba: np.ndarray,
+    alpha_threshold: int = 10,
+    smooth: bool = True,
+) -> np.ndarray:
+    alpha = rgba[:, :, 3]
 
-    gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
-
-    # stærkere threshold (renere silhuet)
-    _, mask = cv2.threshold(
-        gray,
-        0,
-        255,
-        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-    )
-
-    # 🔥 NYT: fjern støj
-    kernel = np.ones((5,5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-    # 🔥 NYT: fjern små prikker
-    mask = cv2.medianBlur(mask, 7)
+    mask = (alpha > alpha_threshold).astype(np.uint8) * 255
 
     if smooth:
         mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
     return mask
 
