@@ -482,8 +482,26 @@ def generate_poster_pdf(
     width = PAGE_W_MM * mm
     height = PAGE_H_MM * mm
 
+    # Format-specifikke værdier
+
+if PAGE_W_MM >= 500:      # 50x70 og A1
+    TITLE_FONT_SIZE = 55
+    LOGO_WIDTH_MM = 60
+
+elif PAGE_W_MM >= 400:    # A2
+    TITLE_FONT_SIZE = 45
+    LOGO_WIDTH_MM = 50
+
+elif PAGE_W_MM >= 297:    # A3
+    TITLE_FONT_SIZE = 35
+    LOGO_WIDTH_MM = 40
+
+else:                     # A4
+    TITLE_FONT_SIZE = 25
+    LOGO_WIDTH_MM = 30
+
     top_band_h = TOP_BAND_MM * mm
-    logo_width = LOGO_WIDTH_MM * mm
+    logo_width = logo_width_mm * mm
     logo_bottom = LOGO_BOTTOM_MM * mm
 
     tmp_svg = tempfile.NamedTemporaryFile(delete=False, suffix=".svg")
@@ -503,7 +521,7 @@ def generate_poster_pdf(
 
     # title
     c.setFillColorRGB(0, 0, 0)
-    c.setFont(TITLE_FONT, TITLE_FONT_SIZE)
+    c.setFont(TITLE_FONT, title_font_size)
     c.drawCentredString(width / 2, height - (top_band_h / 2), name)
 
     # silhouette area
