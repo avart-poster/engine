@@ -577,7 +577,7 @@ else:                     # A4
     c.save()
 
     pdf_bytes = buffer.getvalue()
-
+    
     try:
         os.unlink(tmp_svg.name)
     except Exception:
