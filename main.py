@@ -578,12 +578,17 @@ else:                     # A4
 
     pdf_bytes = buffer.getvalue()
 
+
+    
     try:
         os.unlink(tmp_svg.name)
+
     except Exception:
         pass
 
     return pdf_bytes
+
+
     
 # --------------------------------------------------
 # API
