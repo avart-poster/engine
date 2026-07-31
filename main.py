@@ -473,35 +473,30 @@ def estimate_head_width(contour: np.ndarray) -> float:
 
 
 def generate_poster_pdf(
-    svg_string: str,
-    name: str,
-    stroke_width: float = DEFAULT_STROKE_WIDTH,
-    head_width: float | None = None,
-    scale_adjust: float = 0.0,  #
+    ...
 ) -> bytes:
     width = PAGE_W_MM * mm
     height = PAGE_H_MM * mm
 
     # Format-specifikke værdier
+    if PAGE_W_MM >= 500:
+        TITLE_FONT_SIZE = 55
+        LOGO_WIDTH_MM = 60
 
-if PAGE_W_MM >= 500:      # 50x70 og A1
-    TITLE_FONT_SIZE = 55
-    LOGO_WIDTH_MM = 60
+    elif PAGE_W_MM >= 400:
+        TITLE_FONT_SIZE = 45
+        LOGO_WIDTH_MM = 50
 
-elif PAGE_W_MM >= 400:    # A2
-    TITLE_FONT_SIZE = 45
-    LOGO_WIDTH_MM = 50
+    elif PAGE_W_MM >= 297:
+        TITLE_FONT_SIZE = 35
+        LOGO_WIDTH_MM = 40
 
-elif PAGE_W_MM >= 297:    # A3
-    TITLE_FONT_SIZE = 35
-    LOGO_WIDTH_MM = 40
-
-else:                     # A4
-    TITLE_FONT_SIZE = 25
-    LOGO_WIDTH_MM = 30
+    else:
+        TITLE_FONT_SIZE = 25
+        LOGO_WIDTH_MM = 30
 
     top_band_h = TOP_BAND_MM * mm
-    logo_width = logo_width_mm * mm
+    logo_width = LOGO_WIDTH_MM * mm
     logo_bottom = LOGO_BOTTOM_MM * mm
 
     tmp_svg = tempfile.NamedTemporaryFile(delete=False, suffix=".svg")
