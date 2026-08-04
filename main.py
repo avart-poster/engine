@@ -473,7 +473,6 @@ def estimate_head_width(contour: np.ndarray) -> float:
 
 
 def generate_poster_pdf(
-    ...
 ) -> bytes:
     width = PAGE_W_MM * mm
     height = PAGE_H_MM * mm
