@@ -21,10 +21,13 @@ from reportlab.graphics import renderPDF
 
 from svglib.svglib import svg2rlg
 
+pdfmetrics.registerFont(
+    TTFont("The Seasons Bold", "assets/The Seasons Bold.ttf")
+)
 
-# --------------------------------
+# ----------------------------------
 # AVART DESIGN SETTINGS
-# --------------------------------
+# ----------------------------------
 
 BG_COLOR = (0.95, 0.93, 0.90)
 
@@ -63,17 +66,20 @@ app.add_middleware(
 )
 
 
-# --------------------------------------------------
+# ------------------------------------------------
 # Optional custom font
-# --------------------------------------------------
+# ------------------------------------------------
 
 TITLE_FONT = "Helvetica-Bold"
 
 try:
-    pdfmetrics.registerFont(TTFont("TheSeasonsBold", "fonts/TheSeasons-Bold.otf"))
-    TITLE_FONT = "TheSeasonsBold"
-except Exception:
-    TITLE_FONT = "Helvetica-Bold"
+    pdfmetrics.registerFont(
+        TTFont("The Seasons Bold", "assets/The Seasons Bold.ttf")
+    )
+    TITLE_FONT = "The Seasons Bold"
+
+except Exception as e:
+    print(f"Could not load custom font: {e}")
 
 
 # --------------------------------------------------
