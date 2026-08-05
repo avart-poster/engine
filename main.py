@@ -473,114 +473,191 @@ def estimate_head_width(contour: np.ndarray) -> float:
 
 
 def generate_poster_pdf(
+    svg_string: str,
+    name: str,
+    stroke_width: float = DEFAULT_STROKE_WIDTH,
+    head_width: float | None = None,
+    scale_adjust: float = 0.0,
 ) -> bytes:
     width = PAGE_W_MM * mm
     height = PAGE_H_MM * mm
 
     # Format-specifikke værdier
     if PAGE_W_MM >= 500:
-        TITLE_FONT_SIZE = 55
-        LOGO_WIDTH_MM = 60
+        title_font_size = 55
+        logo_width_mm = 60
 
     elif PAGE_W_MM >= 400:
-        TITLE_FONT_SIZE = 45
-        LOGO_WIDTH_MM = 50
+        title_font_size = 45
+        logo_width_mm = 50
 
     elif PAGE_W_MM >= 297:
-        TITLE_FONT_SIZE = 35
-        LOGO_WIDTH_MM = 40
+        title_font_size = 35
+        logo_width_mm = 40
 
     else:
-        TITLE_FONT_SIZE = 25
-        LOGO_WIDTH_MM = 30
+        title_font_size = 25
+        logo_width_mm = 30
 
     top_band_h = TOP_BAND_MM * mm
-    logo_width = LOGO_WIDTH_MM * mm
+    logo_width = logo_width_mm * mm
     logo_bottom = LOGO_BOTTOM_MM * mm
 
-    tmp_svg = tempfile.NamedTemporaryFile(delete=False, suffix=".svg")
-    tmp_svg.write(svg_string.encode("utf-8"))
-    tmp_svg.close()
+    tmp_svg = tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=".svg",
+    )
 
-    drawing = svg2rlg(tmp_svg.name)
-    if drawing is None:
-        raise ValueError("Could not convert silhouette SVG to drawing")
-
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=(width, height))
-
-    # background
-    c.setFillColorRGB(*BG_COLOR)
-    c.rect(0, 0, width, height, fill=1, stroke=0)
-
-    # title
-    c.setFillColorRGB(0, 0, 0)
-    c.setFont(TITLE_FONT, title_font_size)
-    c.drawCentredString(width / 2, height - (top_band_h / 2), name)
-
-    # silhouette area
-    silhouette_top_y = height - top_band_h
-    silhouette_bottom_y = 0
-    silhouette_height = silhouette_top_y - silhouette_bottom_y
-
-    # original bounds
-    min_x, min_y, max_x, max_y = drawing.getBounds()
-    raw_w = max_x - min_x
-    raw_h = max_y - min_y
-
-    TARGET_HEAD_RATIO = 0.60
-    MAX_HEIGHT_RATIO = 1.50
-
-    if head_width is None or head_width <= 0:
-        head_width = raw_w * 0.7
-
-    silhouette_scale = (width * TARGET_HEAD_RATIO) / head_width
-    silhouette_scale *= (1 + scale_adjust)
-    drawing.scale(silhouette_scale, silhouette_scale)
-    set_stroke_width_recursive(drawing, stroke_width / silhouette_scale)
-
-    # recalc bounds after scaling
-    min_x, min_y, max_x, max_y = drawing.getBounds()
-    draw_w = max_x - min_x
-
-    # center horizontally, anchor to bottom
-    x = (width - draw_w) / 2 - min_x
-    y = -min_y
-
-    c.saveState()
-    c.translate(x, y)
-    renderPDF.draw(drawing, c, 0, 0)
-    c.restoreState()
-
-    # logo
-    if os.path.exists("assets/avart-logo.svg"):
-        logo = svg2rlg("assets/avart-logo.svg")
-        if logo is not None:
-            logo_scale = logo_width / logo.width
-            logo.scale(logo_scale, logo_scale)
-
-            l_min_x, l_min_y, l_max_x, l_max_y = logo.getBounds()
-            logo_w = l_max_x - l_min_x
-
-            logo_x = (width - logo_w) / 2 - l_min_x
-            logo_y = logo_bottom - l_min_y
-
-            renderPDF.draw(logo, c, logo_x, logo_y)
-
-    c.showPage()
-    c.save()
-
-    pdf_bytes = buffer.getvalue()
-
-
-    
     try:
-        os.unlink(tmp_svg.name)
+        tmp_svg.write(svg_string.encode("utf-8"))
+        tmp_svg.close()
 
-    except Exception:
-        pass
+        drawing = svg2rlg(tmp_svg.name)
 
-    return pdf_bytes
+        if drawing is None:
+            raise ValueError(
+                "Could not convert silhouette SVG to drawing"
+            )
+
+        buffer = io.BytesIO()
+        c = canvas.Canvas(
+            buffer,
+            pagesize=(width, height),
+        )
+
+        # Background
+        c.setFillColorRGB(*BG_COLOR)
+        c.rect(
+            0,
+            0,
+            width,
+            height,
+            fill=1,
+            stroke=0,
+        )
+
+        # Titel
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont(
+            TITLE_FONT,
+            title_font_size,
+        )
+        c.drawCentredString(
+            width / 2,
+            height - (top_band_h / 2),
+            name,
+        )
+
+        # Oprindelige SVG-grænser
+        min_x, min_y, max_x, max_y = drawing.getBounds()
+
+        raw_w = max_x - min_x
+
+        if raw_w <= 0:
+            raise ValueError("Silhouette has invalid width")
+
+        if head_width is None or head_width <= 0:
+            head_width = raw_w * 0.7
+
+        # Grundskalering ud fra hovedets bredde
+        target_head_ratio = 0.60
+
+        silhouette_scale = (
+            width * target_head_ratio
+        ) / head_width
+
+        # Brugerens manuelle skalering:
+        # -0.2, -0.1, 0, +0.1, +0.2
+        silhouette_scale *= 1 + scale_adjust
+
+        if silhouette_scale <= 0:
+            raise ValueError("Invalid silhouette scale")
+
+        drawing.scale(
+            silhouette_scale,
+            silhouette_scale,
+        )
+
+        # Bevar den ønskede stregtykkelse efter skalering
+        set_stroke_width_recursive(
+            drawing,
+            stroke_width / silhouette_scale,
+        )
+
+        # Nye grænser efter skalering
+        min_x, min_y, max_x, max_y = drawing.getBounds()
+
+        draw_w = max_x - min_x
+
+        # Centrer vandret og placer ved bunden
+        x = (width - draw_w) / 2 - min_x
+        y = -min_y
+
+        c.saveState()
+        c.translate(x, y)
+        renderPDF.draw(
+            drawing,
+            c,
+            0,
+            0,
+        )
+        c.restoreState()
+
+        # Logo
+        logo_path = "assets/avart-logo.svg"
+
+        if os.path.exists(logo_path):
+            logo = svg2rlg(logo_path)
+
+            if logo is not None and logo.width > 0:
+                logo_scale = logo_width / logo.width
+
+                logo.scale(
+                    logo_scale,
+                    logo_scale,
+                )
+
+                (
+                    logo_min_x,
+                    logo_min_y,
+                    logo_max_x,
+                    logo_max_y,
+                ) = logo.getBounds()
+
+                rendered_logo_width = (
+                    logo_max_x - logo_min_x
+                )
+
+                logo_x = (
+                    width - rendered_logo_width
+                ) / 2 - logo_min_x
+
+                logo_y = (
+                    logo_bottom - logo_min_y
+                )
+
+                renderPDF.draw(
+                    logo,
+                    c,
+                    logo_x,
+                    logo_y,
+                )
+
+        c.showPage()
+        c.save()
+
+        return buffer.getvalue()
+
+    finally:
+        try:
+            tmp_svg.close()
+        except Exception:
+            pass
+
+        try:
+            os.unlink(tmp_svg.name)
+        except Exception:
+            pass
 
 
     
