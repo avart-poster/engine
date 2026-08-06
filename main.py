@@ -483,7 +483,7 @@ def generate_poster_pdf(
     name: str,
     stroke_width: float = DEFAULT_STROKE_WIDTH,
     head_width: float | None = None,
-    scale_adjust: float = 0.0,
+    scale_level: int = 0,
 ) -> bytes:
     width = PAGE_W_MM * mm
     height = PAGE_H_MM * mm
@@ -574,7 +574,15 @@ def generate_poster_pdf(
 
         # Brugerens manuelle skalering:
         # -0.2, -0.1, 0, +0.1, +0.2
-        silhouette_scale *= 1 + scale_adjust
+        scale_factors = {
+    -2: 0.70,
+    -1: 0.80,
+     0: 0.90,
+     1: 1.00,
+     2: 1.10,
+}
+        
+silhouette_scale *= scale_factors[scale_level]
 
         if silhouette_scale <= 0:
             raise ValueError("Invalid silhouette scale")
@@ -810,7 +818,7 @@ async def poster_pdf(
     stroke_width: float = Query(3.5, ge=0.5, le=12.0),
     crop_to_subject: bool = Query(True),
     pad: int = Query(30, ge=0, le=300),
-    scale_adjust: float = Query(0.0, ge=-0.2, le=0.2),
+    scale_level: int = Query(0, ge=-2, le=2),
 ):
     try:
         rgba = remove_background_if_needed(file1, max_dimension=max_dimension)
@@ -840,7 +848,7 @@ async def poster_pdf(
             name,
             stroke_width=stroke_width,
             head_width=head_width,
-            scale_adjust=scale_adjust,
+            scale_level=scale_level,
         )
         
         return StreamingResponse(
