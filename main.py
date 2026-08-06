@@ -572,17 +572,16 @@ def generate_poster_pdf(
             width * target_head_ratio
         ) / head_width
 
-        # Brugerens manuelle skalering:
-        # -0.2, -0.1, 0, +0.1, +0.2
+        # Brugerens manuelle skalering
         scale_factors = {
-    -2: 0.70,
-    -1: 0.80,
-     0: 0.90,
-     1: 1.00,
-     2: 1.10,
-}
-        
-silhouette_scale *= scale_factors[scale_level]
+            -2: 0.70,
+            -1: 0.80,
+             0: 0.90,
+             1: 1.00,
+             2: 1.10,
+        }
+
+        silhouette_scale *= scale_factors[scale_level]
 
         if silhouette_scale <= 0:
             raise ValueError("Invalid silhouette scale")
