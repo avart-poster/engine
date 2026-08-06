@@ -595,7 +595,7 @@ def generate_poster_pdf(
         # ------------------------------------------------
 
         # Gør standardpersonen større end i den tidligere version
-        target_head_ratio = 0.83
+        target_head_ratio = 0.76
 
         base_scale = (
             width * target_head_ratio
