@@ -36,7 +36,7 @@ PAGE_H_MM = 700
 
 TOP_BAND_MM = 115
 
-TITLE_FONT_SIZE = 35
+TITLE_FONT_SIZE = 28
 
 LOGO_WIDTH_MM = 50
 LOGO_BOTTOM_MM = 50
@@ -488,26 +488,36 @@ def generate_poster_pdf(
     width = PAGE_W_MM * mm
     height = PAGE_H_MM * mm
 
+    # ------------------------------------------------
     # Format-specifikke værdier
-    if PAGE_W_MM >= 500:
+    # ------------------------------------------------
+
+    if PAGE_W_MM >= 590:       # A1: 594 × 841 mm
         title_font_size = 55
         logo_width_mm = 60
 
-    elif PAGE_W_MM >= 400:
+    elif PAGE_W_MM >= 500:     # 500 × 700 mm
         title_font_size = 45
         logo_width_mm = 50
 
-    elif PAGE_W_MM >= 297:
+    elif PAGE_W_MM >= 420:     # A2: 420 × 594 mm
         title_font_size = 35
         logo_width_mm = 40
 
-    else:
+    else:                      # A3: 297 × 420 mm
         title_font_size = 25
         logo_width_mm = 30
 
     top_band_h = TOP_BAND_MM * mm
     logo_width = logo_width_mm * mm
     logo_bottom = LOGO_BOTTOM_MM * mm
+
+    # Området under teksten, hvor silhuetten må være
+    max_silhouette_height = height - top_band_h
+
+    # ------------------------------------------------
+    # Midlertidig SVG-fil
+    # ------------------------------------------------
 
     tmp_svg = tempfile.NamedTemporaryFile(
         delete=False,
@@ -525,13 +535,18 @@ def generate_poster_pdf(
                 "Could not convert silhouette SVG to drawing"
             )
 
+        # ------------------------------------------------
+        # Opret PDF
+        # ------------------------------------------------
+
         buffer = io.BytesIO()
+
         c = canvas.Canvas(
             buffer,
             pagesize=(width, height),
         )
 
-        # Background
+        # Baggrund
         c.setFillColorRGB(*BG_COLOR)
         c.rect(
             0,
@@ -542,81 +557,128 @@ def generate_poster_pdf(
             stroke=0,
         )
 
+        # ------------------------------------------------
         # Titel
+        # ------------------------------------------------
+
         c.setFillColorRGB(0, 0, 0)
         c.setFont(
             TITLE_FONT,
             title_font_size,
         )
+
         c.drawCentredString(
             width / 2,
             height - (top_band_h / 2),
             name,
         )
 
-        # Oprindelige SVG-grænser
+        # ------------------------------------------------
+        # Silhuettens oprindelige mål
+        # ------------------------------------------------
+
         min_x, min_y, max_x, max_y = drawing.getBounds()
 
         raw_w = max_x - min_x
+        raw_h = max_y - min_y
 
-        if raw_w <= 0:
-            raise ValueError("Silhouette has invalid width")
+        if raw_w <= 0 or raw_h <= 0:
+            raise ValueError(
+                "Silhouette has invalid dimensions"
+            )
 
         if head_width is None or head_width <= 0:
             head_width = raw_w * 0.7
 
-        # Grundskalering ud fra hovedets bredde
-        target_head_ratio = 0.60
+        # ------------------------------------------------
+        # Grundstørrelse
+        # ------------------------------------------------
 
-        silhouette_scale = (
+        # Gør standardpersonen større end i den tidligere version
+        target_head_ratio = 0.83
+
+        base_scale = (
             width * target_head_ratio
         ) / head_width
 
-        # Brugerens manuelle skalering
+        # ------------------------------------------------
+        # Fem størrelsesniveauer
+        # ------------------------------------------------
+
+        if scale_level not in (-2, -1, 0, 1, 2):
+            raise ValueError(
+                "scale_level must be between -2 and 2"
+            )
+
         scale_factors = {
-            -2: 0.70,
-            -1: 0.80,
-             0: 0.90,
-             1: 1.00,
-             2: 1.10,
+            -2: 0.85,
+            -1: 0.92,
+             0: 1.00,
+             1: 1.08,
+             2: 1.15,
         }
 
-        silhouette_scale *= scale_factors[scale_level]
+        desired_scale = (
+            base_scale * scale_factors[scale_level]
+        )
+
+        # Silhuetten må aldrig gå op i tekstfeltet.
+        # Den forbliver samtidig forankret i bunden.
+        maximum_scale = (
+            max_silhouette_height / raw_h
+        )
+
+        silhouette_scale = min(
+            desired_scale,
+            maximum_scale,
+        )
 
         if silhouette_scale <= 0:
-            raise ValueError("Invalid silhouette scale")
+            raise ValueError(
+                "Invalid silhouette scale"
+            )
 
         drawing.scale(
             silhouette_scale,
             silhouette_scale,
         )
 
-        # Bevar den ønskede stregtykkelse efter skalering
+        # Bevar den valgte stregtykkelse efter skalering
         set_stroke_width_recursive(
             drawing,
             stroke_width / silhouette_scale,
         )
 
-        # Nye grænser efter skalering
+        # ------------------------------------------------
+        # Nye mål efter skalering
+        # ------------------------------------------------
+
         min_x, min_y, max_x, max_y = drawing.getBounds()
 
         draw_w = max_x - min_x
 
-        # Centrer vandret og placer ved bunden
+        # Centrer vandret
         x = (width - draw_w) / 2 - min_x
+
+        # Forankr altid silhuetten helt i bunden
         y = -min_y
 
         c.saveState()
         c.translate(x, y)
+
         renderPDF.draw(
             drawing,
             c,
             0,
             0,
         )
+
         c.restoreState()
 
+        # ------------------------------------------------
         # Logo
+        # ------------------------------------------------
+
         logo_path = "assets/avart-logo.svg"
 
         if os.path.exists(logo_path):
@@ -671,7 +733,6 @@ def generate_poster_pdf(
             os.unlink(tmp_svg.name)
         except Exception:
             pass
-
 
     
 # --------------------------------------------------
