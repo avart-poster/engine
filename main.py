@@ -512,9 +512,6 @@ def generate_poster_pdf(
     logo_width = logo_width_mm * mm
     logo_bottom = LOGO_BOTTOM_MM * mm
 
-    # Området under teksten, hvor silhuetten må være
-    max_silhouette_height = height - top_band_h
-
     # ------------------------------------------------
     # Midlertidig SVG-fil
     # ------------------------------------------------
@@ -587,51 +584,35 @@ def generate_poster_pdf(
                 "Silhouette has invalid dimensions"
             )
 
-        if head_width is None or head_width <= 0:
-            head_width = raw_w * 0.7
-
         # ------------------------------------------------
-        # Grundstørrelse
+        # Størrelsesniveauer
         # ------------------------------------------------
+        # 0 = standard
+        # +2 = maksimalt op til 110 mm fra toppen
+        # -2 = mindre / længere nede
+        #
+        # Personen forbliver ALTID forankret i bunden.
 
-        # Gør standardpersonen større end i den tidligere version
-        target_head_ratio = 0.76
+        top_positions_mm = {
+            -2: 210,
+            -1: 185,
+             0: 160,
+             1: 135,
+             2: 110,
+        }
 
-        base_scale = (
-            width * target_head_ratio
-        ) / head_width
-
-        # ------------------------------------------------
-        # Fem størrelsesniveauer
-        # ------------------------------------------------
-
-        if scale_level not in (-2, -1, 0, 1, 2):
+        if scale_level not in top_positions_mm:
             raise ValueError(
                 "scale_level must be between -2 and 2"
             )
 
-        scale_factors = {
-            -2: 0.85,
-            -1: 0.92,
-             0: 1.00,
-             1: 1.08,
-             2: 1.15,
-        }
+        target_top_mm = top_positions_mm[scale_level]
 
-        desired_scale = (
-            base_scale * scale_factors[scale_level]
-        )
+        # Hvor høj skal silhuetten være fra bund til ønsket top?
+        target_height = height - (target_top_mm * mm)
 
-        # Silhuetten må aldrig gå op i tekstfeltet.
-        # Den forbliver samtidig forankret i bunden.
-        maximum_scale = (
-            max_silhouette_height / raw_h
-        )
-
-        silhouette_scale = min(
-            desired_scale,
-            maximum_scale,
-        )
+        # Beregn skalering ud fra hele silhuettens højde
+        silhouette_scale = target_height / raw_h
 
         if silhouette_scale <= 0:
             raise ValueError(
@@ -643,7 +624,7 @@ def generate_poster_pdf(
             silhouette_scale,
         )
 
-        # Bevar den valgte stregtykkelse efter skalering
+        # Bevar korrekt stroke efter skalering
         set_stroke_width_recursive(
             drawing,
             stroke_width / silhouette_scale,
@@ -660,8 +641,12 @@ def generate_poster_pdf(
         # Centrer vandret
         x = (width - draw_w) / 2 - min_x
 
-        # Forankr altid silhuetten helt i bunden
+        # ALTID fast i bunden
         y = -min_y
+
+        # ------------------------------------------------
+        # Tegn silhuetten
+        # ------------------------------------------------
 
         c.saveState()
         c.translate(x, y)
