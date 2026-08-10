@@ -814,23 +814,94 @@ def generate_multi_poster_pdf(
     # ANTAL PERSONER
     # ------------------------------------------------
 
+       # ------------------------------------------------
+    # ANTAL PERSONER / VANDRET GRID
+    # ------------------------------------------------
+
     count = len(persons)
 
-    if count < 1 or count > 3:
+    if count < 1 or count > 6:
         raise ValueError(
-            "This version supports 1 to 3 persons"
+            "This version supports 1 to 6 persons"
         )
 
-    # Første baseline for vandret placering.
-    # Den finjusterer vi visuelt bagefter.
-    if count == 1:
-        center_positions = [0.50]
+    # ------------------------------------------------
+    # PORTRAIT: 1-2 personer
+    # ------------------------------------------------
 
-    elif count == 2:
-        center_positions = [0.35, 0.65]
+    if orientation == "portrait":
+
+        if count == 1:
+            center_positions = [
+                0.50,
+            ]
+
+        elif count == 2:
+            center_positions = [
+                0.375,
+                0.625,
+            ]
+
+        else:
+            raise ValueError(
+                "Portrait supports max 2 persons"
+            )
+
+    # ------------------------------------------------
+    # LANDSCAPE: 3-6 personer
+    # ------------------------------------------------
 
     else:
-        center_positions = [0.25, 0.50, 0.75]
+
+        side_margins_mm = {
+            3: 125,
+            4: 90,
+            5: 50,
+            6: 50,
+        }
+
+        if count not in side_margins_mm:
+            raise ValueError(
+                "Landscape supports 3 to 6 persons"
+            )
+
+        side_margin = (
+            side_margins_mm[count] * mm
+        )
+
+        # Fordel personernes centre jævnt mellem
+        # venstre og højre designmargin.
+        #
+        # Vi bruger marginen som gruppens ydre ramme.
+        # Den individuelle side-sikkerhed længere nede
+        # beskytter stadig mod at hår osv. bliver skåret af.
+
+        usable_width = (
+            width - (2 * side_margin)
+        )
+
+        if count == 1:
+            center_positions = [
+                0.50,
+            ]
+
+        else:
+            center_positions = []
+
+            for i in range(count):
+
+                position_x = (
+                    side_margin
+                    + (
+                        usable_width
+                        * i
+                        / (count - 1)
+                    )
+                )
+
+                center_positions.append(
+                    position_x / width
+                )
 
     # ------------------------------------------------
     # OPRET PDF
