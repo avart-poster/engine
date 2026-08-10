@@ -593,13 +593,25 @@ def generate_poster_pdf(
         #
         # Personen forbliver ALTID forankret i bunden.
 
-        top_positions_mm = {
-            -2: 210,
-            -1: 185,
-             0: 160,
-             1: 135,
-             2: 110,
-        }
+        if orientation == "landscape":
+            # 700 × 500 mm
+            top_positions_mm = {
+                -2: 180,
+                -1: 150,
+                 0: 120,
+                 1: 105,
+                 2: 90,
+            }
+
+        else:
+            # 500 × 700 mm
+            top_positions_mm = {
+                -2: 210,
+                -1: 185,
+                 0: 160,
+                 1: 135,
+                 2: 110,
+            }
 
         if scale_level not in top_positions_mm:
             raise ValueError(
