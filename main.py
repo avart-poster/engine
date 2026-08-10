@@ -1279,7 +1279,7 @@ async def poster_pdf(
         # Hjælpefunktion til behandling af én person
         # ------------------------------------------------
 
-               def process_person(file):
+        def process_person(file):
 
             rgba = remove_background_if_needed(
                 file,
