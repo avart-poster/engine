@@ -736,6 +736,7 @@ def generate_multi_poster_pdf(
     persons: list,
     name: str,
     stroke_width: float = DEFAULT_STROKE_WIDTH,
+    orientation: str = "portrait",
 ) -> bytes:
 
     width = PAGE_W_MM * mm
