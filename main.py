@@ -922,47 +922,43 @@ def generate_multi_poster_pdf(
             # VANDRET PLACERING
             # --------------------------------------------
 
-           # --------------------------------------------
-# VANDRET PLACERING
-# --------------------------------------------
+            target_center_x = (
+                width * center_positions[index]
+            )
 
-target_center_x = (
-    width * center_positions[index]
-)
+            x = (
+                target_center_x
+                - (draw_w / 2)
+                - min_x
+            )
 
-x = (
-    target_center_x
-    - (draw_w / 2)
-    - min_x
-)
+            # --------------------------------------------
+            # SIKKERHED MOD BESKÅRING I SIDERNE
+            # --------------------------------------------
 
-# --------------------------------------------
-# SIKKERHED MOD BESKÅRING I SIDERNE
-# --------------------------------------------
+            side_margin = 10 * mm
 
-side_margin = 10 * mm
+            left_edge = x + min_x
+            right_edge = x + max_x
 
-left_edge = x + min_x
-right_edge = x + max_x
+            # Hvis personen går ud over venstre side
+            if left_edge < side_margin:
+                x += side_margin - left_edge
 
-# Hvis silhuetten går for langt ud til venstre,
-# flyttes den ind mod midten
-if left_edge < side_margin:
-    x += side_margin - left_edge
+            # Beregn højre kant igen efter evt. flytning
+            right_edge = x + max_x
 
-# Beregn højre kant igen efter evt. venstre-korrektion
-right_edge = x + max_x
+            # Hvis personen går ud over højre side
+            if right_edge > width - side_margin:
+                x -= right_edge - (width - side_margin)
 
-# Hvis silhuetten går for langt ud til højre,
-# flyttes den ind mod midten
-if right_edge > width - side_margin:
-    x -= right_edge - (width - side_margin)
+            # --------------------------------------------
+            # ALTID FAST I BUNDEN
+            # --------------------------------------------
 
-# --------------------------------------------
-# ALTID FAST I BUNDEN
-# --------------------------------------------
+            y = -min_y
+            
 
-y = -min_y
 
             # --------------------------------------------
             # TEGN
