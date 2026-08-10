@@ -1038,15 +1038,59 @@ def generate_multi_poster_pdf(
             # VANDRET PLACERING
             # --------------------------------------------
 
-            target_center_x = (
-                width * center_positions[index]
-            )
 
-            x = (
-                target_center_x
-                - (draw_w / 2)
-                - min_x
-            )
+            # --------------------------------------------
+            # VANDRET PLACERING
+            # --------------------------------------------
+
+            if orientation == "landscape":
+
+                # Første person:
+                # yderste venstre kant skal ramme design-marginen
+                if index == 0:
+                    x = side_margin - min_x
+
+                # Sidste person:
+                # yderste højre kant skal ramme design-marginen
+                elif index == count - 1:
+                    x = (
+                        width
+                        - side_margin
+                        - max_x
+                    )
+
+                # Personerne mellem yderpunkterne
+                # fordeles jævnt i det tilgængelige område
+                else:
+                    target_center_x = (
+                        side_margin
+                        + (
+                            (width - (2 * side_margin))
+                            * index
+                            / (count - 1)
+                        )
+                    )
+
+                    x = (
+                        target_center_x
+                        - (draw_w / 2)
+                        - min_x
+                        )
+
+            else:
+
+                # Portrait: behold vores eksisterende grid
+                target_center_x = (
+                    width * center_positions[index]
+                )
+
+                x = (
+                    target_center_x
+                    - (draw_w / 2)
+                    - min_x
+                )
+
+
 
             # --------------------------------------------
             # SIKKERHED MOD BESKÅRING I SIDERNE
