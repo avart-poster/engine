@@ -922,21 +922,47 @@ def generate_multi_poster_pdf(
             # VANDRET PLACERING
             # --------------------------------------------
 
-            target_center_x = (
-                width * center_positions[index]
-            )
+           # --------------------------------------------
+# VANDRET PLACERING
+# --------------------------------------------
 
-            x = (
-                target_center_x
-                - (draw_w / 2)
-                - min_x
-            )
+target_center_x = (
+    width * center_positions[index]
+)
 
-            # --------------------------------------------
-            # ALTID FAST I BUNDEN
-            # --------------------------------------------
+x = (
+    target_center_x
+    - (draw_w / 2)
+    - min_x
+)
 
-            y = -min_y
+# --------------------------------------------
+# SIKKERHED MOD BESKÅRING I SIDERNE
+# --------------------------------------------
+
+side_margin = 10 * mm
+
+left_edge = x + min_x
+right_edge = x + max_x
+
+# Hvis silhuetten går for langt ud til venstre,
+# flyttes den ind mod midten
+if left_edge < side_margin:
+    x += side_margin - left_edge
+
+# Beregn højre kant igen efter evt. venstre-korrektion
+right_edge = x + max_x
+
+# Hvis silhuetten går for langt ud til højre,
+# flyttes den ind mod midten
+if right_edge > width - side_margin:
+    x -= right_edge - (width - side_margin)
+
+# --------------------------------------------
+# ALTID FAST I BUNDEN
+# --------------------------------------------
+
+y = -min_y
 
             # --------------------------------------------
             # TEGN
