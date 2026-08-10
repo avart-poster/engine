@@ -719,6 +719,310 @@ def generate_poster_pdf(
         except Exception:
             pass
 
+
+def generate_multi_poster_pdf(
+    persons: list,
+    name: str,
+    stroke_width: float = DEFAULT_STROKE_WIDTH,
+) -> bytes:
+
+    width = PAGE_W_MM * mm
+    height = PAGE_H_MM * mm
+
+    # ------------------------------------------------
+    # FORMAT
+    # ------------------------------------------------
+
+    if PAGE_W_MM >= 590:       # A1
+        title_font_size = 55
+        logo_width_mm = 60
+
+    elif PAGE_W_MM >= 500:     # 500 × 700
+        title_font_size = 45
+        logo_width_mm = 50
+
+    elif PAGE_W_MM >= 420:     # A2
+        title_font_size = 35
+        logo_width_mm = 40
+
+    else:                      # A3
+        title_font_size = 25
+        logo_width_mm = 30
+
+    top_band_h = TOP_BAND_MM * mm
+    logo_width = logo_width_mm * mm
+    logo_bottom = LOGO_BOTTOM_MM * mm
+
+    # ------------------------------------------------
+    # HØJDENIVEAUER – LÅST
+    # ------------------------------------------------
+
+    top_positions_mm = {
+        -2: 210,
+        -1: 185,
+         0: 160,
+         1: 135,
+         2: 110,
+    }
+
+    # ------------------------------------------------
+    # ANTAL PERSONER
+    # ------------------------------------------------
+
+    count = len(persons)
+
+    if count < 1 or count > 3:
+        raise ValueError(
+            "This version supports 1 to 3 persons"
+        )
+
+    # Første baseline for vandret placering.
+    # Den finjusterer vi visuelt bagefter.
+    if count == 1:
+        center_positions = [0.50]
+
+    elif count == 2:
+        center_positions = [0.35, 0.65]
+
+    else:
+        center_positions = [0.25, 0.50, 0.75]
+
+    # ------------------------------------------------
+    # OPRET PDF
+    # ------------------------------------------------
+
+    buffer = io.BytesIO()
+
+    c = canvas.Canvas(
+        buffer,
+        pagesize=(width, height),
+    )
+
+    # Baggrund
+    c.setFillColorRGB(*BG_COLOR)
+    c.rect(
+        0,
+        0,
+        width,
+        height,
+        fill=1,
+        stroke=0,
+    )
+
+    # ------------------------------------------------
+    # TITEL
+    # ------------------------------------------------
+
+    c.setFillColorRGB(0, 0, 0)
+
+    c.setFont(
+        TITLE_FONT,
+        title_font_size,
+    )
+
+    c.drawCentredString(
+        width / 2,
+        height - (top_band_h / 2),
+        name,
+    )
+
+    temporary_files = []
+
+    try:
+
+        # ------------------------------------------------
+        # TEGN PERSONER
+        # ------------------------------------------------
+
+        for index, person in enumerate(persons):
+
+            svg_string = person["svg"]
+            scale_level = person.get("scale_level", 0)
+
+            if scale_level not in top_positions_mm:
+                raise ValueError(
+                    "scale_level must be between -2 and 2"
+                )
+
+            # Midlertidig SVG
+            tmp_svg = tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".svg",
+            )
+
+            tmp_svg.write(
+                svg_string.encode("utf-8")
+            )
+
+            tmp_svg.close()
+
+            temporary_files.append(
+                tmp_svg.name
+            )
+
+            drawing = svg2rlg(
+                tmp_svg.name
+            )
+
+            if drawing is None:
+                raise ValueError(
+                    f"Could not convert person {index + 1} SVG"
+                )
+
+            # --------------------------------------------
+            # Oprindelige mål
+            # --------------------------------------------
+
+            min_x, min_y, max_x, max_y = drawing.getBounds()
+
+            raw_w = max_x - min_x
+            raw_h = max_y - min_y
+
+            if raw_w <= 0 or raw_h <= 0:
+                raise ValueError(
+                    f"Person {index + 1} has invalid dimensions"
+                )
+
+            # --------------------------------------------
+            # HØJDE
+            # --------------------------------------------
+
+            target_top_mm = top_positions_mm[
+                scale_level
+            ]
+
+            target_height = (
+                height - (target_top_mm * mm)
+            )
+
+            silhouette_scale = (
+                target_height / raw_h
+            )
+
+            drawing.scale(
+                silhouette_scale,
+                silhouette_scale,
+            )
+
+            # Bevar stregtykkelsen
+            set_stroke_width_recursive(
+                drawing,
+                stroke_width / silhouette_scale,
+            )
+
+            # --------------------------------------------
+            # Nye bounds
+            # --------------------------------------------
+
+            min_x, min_y, max_x, max_y = drawing.getBounds()
+
+            draw_w = max_x - min_x
+
+            # --------------------------------------------
+            # VANDRET PLACERING
+            # --------------------------------------------
+
+            target_center_x = (
+                width * center_positions[index]
+            )
+
+            x = (
+                target_center_x
+                - (draw_w / 2)
+                - min_x
+            )
+
+            # --------------------------------------------
+            # ALTID FAST I BUNDEN
+            # --------------------------------------------
+
+            y = -min_y
+
+            # --------------------------------------------
+            # TEGN
+            # --------------------------------------------
+
+            c.saveState()
+
+            c.translate(
+                x,
+                y,
+            )
+
+            renderPDF.draw(
+                drawing,
+                c,
+                0,
+                0,
+            )
+
+            c.restoreState()
+
+        # ------------------------------------------------
+        # LOGO
+        # ------------------------------------------------
+
+        logo_path = "assets/avart-logo.svg"
+
+        if os.path.exists(logo_path):
+
+            logo = svg2rlg(
+                logo_path
+            )
+
+            if logo is not None and logo.width > 0:
+
+                logo_scale = (
+                    logo_width / logo.width
+                )
+
+                logo.scale(
+                    logo_scale,
+                    logo_scale,
+                )
+
+                (
+                    logo_min_x,
+                    logo_min_y,
+                    logo_max_x,
+                    logo_max_y,
+                ) = logo.getBounds()
+
+                rendered_logo_width = (
+                    logo_max_x - logo_min_x
+                )
+
+                logo_x = (
+                    width - rendered_logo_width
+                ) / 2 - logo_min_x
+
+                logo_y = (
+                    logo_bottom - logo_min_y
+                )
+
+                renderPDF.draw(
+                    logo,
+                    c,
+                    logo_x,
+                    logo_y,
+                )
+
+        c.showPage()
+        c.save()
+
+        return buffer.getvalue()
+
+    finally:
+
+        for temp_path in temporary_files:
+
+            try:
+                os.unlink(temp_path)
+
+            except Exception:
+                pass
+
+
     
 # --------------------------------------------------
 # API
@@ -854,53 +1158,169 @@ async def poster_pdf(
     file1: UploadFile = File(...),
     file2: UploadFile | None = File(None),
     file3: UploadFile | None = File(None),
+
     name: str = Query("Clara & Ellinor"),
-    max_dimension: int = Query(MAX_DIMENSION, ge=600, le=3000),
-    alpha_threshold: int = Query(1, ge=0, le=255),
+
+    max_dimension: int = Query(
+        MAX_DIMENSION,
+        ge=600,
+        le=3000,
+    ),
+
+    alpha_threshold: int = Query(
+        1,
+        ge=0,
+        le=255,
+    ),
+
     smooth: bool = Query(True),
-    epsilon_ratio: float = Query(0.00020, ge=0.00005, le=0.02),
-    smooth_window: int = Query(13, ge=3, le=51),
-    stroke_width: float = Query(3.5, ge=0.5, le=12.0),
+
+    epsilon_ratio: float = Query(
+        0.00020,
+        ge=0.00005,
+        le=0.02,
+    ),
+
+    smooth_window: int = Query(
+        13,
+        ge=3,
+        le=51,
+    ),
+
+    stroke_width: float = Query(
+        3.5,
+        ge=0.5,
+        le=12.0,
+    ),
+
     crop_to_subject: bool = Query(True),
-    pad: int = Query(30, ge=0, le=300),
-    scale_level: int = Query(0, ge=-2, le=2),
+
+    pad: int = Query(
+        30,
+        ge=0,
+        le=300,
+    ),
+
+    # Individuel skalering af hver person
+    scale_level1: int = Query(0, ge=-2, le=2),
+    scale_level2: int = Query(0, ge=-2, le=2),
+    scale_level3: int = Query(0, ge=-2, le=2),
 ):
     try:
-        rgba = remove_background_if_needed(file1, max_dimension=max_dimension)
-        h, w = rgba.shape[:2]
 
-        mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
+        # ------------------------------------------------
+        # Hjælpefunktion til behandling af én person
+        # ------------------------------------------------
 
-        contour = get_smoothed_outer_contour(
-            mask,
-            epsilon_ratio=epsilon_ratio,
-            smooth_window=smooth_window,
-        )
+        def process_person(file):
 
-        head_width = estimate_head_width(contour)
+            rgba = remove_background_if_needed(
+                file,
+                max_dimension=max_dimension,
+            )
 
-        svg = contour_to_svg(
-            contour=contour,
-            width=w,
-            height=h,
+            h, w = rgba.shape[:2]
+
+            mask = alpha_to_mask(
+                rgba,
+                alpha_threshold=alpha_threshold,
+                smooth=smooth,
+            )
+
+            contour = get_smoothed_outer_contour(
+                mask,
+                epsilon_ratio=epsilon_ratio,
+                smooth_window=smooth_window,
+            )
+
+            head_width = estimate_head_width(contour)
+
+            svg = contour_to_svg(
+                contour=contour,
+                width=w,
+                height=h,
+                stroke_width=stroke_width,
+                crop_to_subject=crop_to_subject,
+                pad=pad,
+            )
+
+            return {
+                "svg": svg,
+                "head_width": head_width,
+            }
+
+        # ------------------------------------------------
+        # PERSON 1
+        # ------------------------------------------------
+
+        person1 = process_person(file1)
+
+        persons = [
+            {
+                "svg": person1["svg"],
+                "head_width": person1["head_width"],
+                "scale_level": scale_level1,
+            }
+        ]
+
+        # ------------------------------------------------
+        # PERSON 2
+        # ------------------------------------------------
+
+        if file2 is not None:
+
+            person2 = process_person(file2)
+
+            persons.append(
+                {
+                    "svg": person2["svg"],
+                    "head_width": person2["head_width"],
+                    "scale_level": scale_level2,
+                }
+            )
+
+        # ------------------------------------------------
+        # PERSON 3
+        # ------------------------------------------------
+
+        if file3 is not None:
+
+            person3 = process_person(file3)
+
+            persons.append(
+                {
+                    "svg": person3["svg"],
+                    "head_width": person3["head_width"],
+                    "scale_level": scale_level3,
+                }
+            )
+
+        # ------------------------------------------------
+        # GENERER PDF
+        # ------------------------------------------------
+
+        pdf_bytes = generate_multi_poster_pdf(
+            persons=persons,
+            name=name,
             stroke_width=stroke_width,
-            crop_to_subject=crop_to_subject,
-            pad=pad,
         )
 
-        pdf_bytes = generate_poster_pdf(
-            svg,
-            name,
-            stroke_width=stroke_width,
-            head_width=head_width,
-            scale_level=scale_level,
-        )
-        
+        # ------------------------------------------------
+        # DOWNLOAD
+        # ------------------------------------------------
+
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'},
+            headers={
+                "Content-Disposition":
+                f'attachment; filename="{name}.pdf"'
+            },
         )
 
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400,
+        )
