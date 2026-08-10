@@ -739,8 +739,19 @@ def generate_multi_poster_pdf(
     orientation: str = "portrait",
 ) -> bytes:
 
-    width = PAGE_W_MM * mm
-    height = PAGE_H_MM * mm
+    # ------------------------------------------------
+    # SIDEFORMAT / ORIENTATION
+    # ------------------------------------------------
+
+    if orientation == "landscape":
+        page_w_mm = max(PAGE_W_MM, PAGE_H_MM)
+        page_h_mm = min(PAGE_W_MM, PAGE_H_MM)
+    else:
+        page_w_mm = min(PAGE_W_MM, PAGE_H_MM)
+        page_h_mm = max(PAGE_W_MM, PAGE_H_MM)
+
+    width = page_w_mm * mm
+    height = page_h_mm * mm
 
     # ------------------------------------------------
     # FORMAT
@@ -766,17 +777,38 @@ def generate_multi_poster_pdf(
     logo_width = logo_width_mm * mm
     logo_bottom = LOGO_BOTTOM_MM * mm
 
-    # ------------------------------------------------
-    # HØJDENIVEAUER – LÅST
-    # ------------------------------------------------
 
-    top_positions_mm = {
+
+    # ------------------------------------------------
+    # HØJDENIVEAUER
+    # ------------------------------------------------
+    # Portrait 500 × 700:
+    #   niveau 0 = 160 mm fra toppen
+    #   niveau +2 = 110 mm fra toppen
+    #
+    # Landscape 700 × 500:
+    #   niveau 0 = 120 mm fra toppen
+    #   niveau +2 = 90 mm fra toppen
+    #
+    # Silhuetten er ALTID forankret i bunden.
+
+    if orientation == "landscape":
+        top_positions_mm = {
+        -2: 180,
+        -1: 150,
+         0: 120,
+         1: 105,
+         2: 90,
+        }
+    else:
+        top_positions_mm = {
         -2: 210,
         -1: 185,
          0: 160,
          1: 135,
          2: 110,
-    }
+        }
+
 
     # ------------------------------------------------
     # ANTAL PERSONER
@@ -1247,7 +1279,7 @@ async def poster_pdf(
         # Hjælpefunktion til behandling af én person
         # ------------------------------------------------
 
-        def process_person(file):
+               def process_person(file):
 
             rgba = remove_background_if_needed(
                 file,
@@ -1331,6 +1363,21 @@ async def poster_pdf(
             )
 
         # ------------------------------------------------
+        # AUTOMATISK FORMAT
+        # ------------------------------------------------
+        #
+        # 1-2 personer = højformat
+        # 3+ personer   = bredformat
+        #
+
+        person_count = len(persons)
+
+        if person_count <= 2:
+            orientation = "portrait"
+        else:
+            orientation = "landscape"
+
+        # ------------------------------------------------
         # GENERER PDF
         # ------------------------------------------------
 
@@ -1338,6 +1385,7 @@ async def poster_pdf(
             persons=persons,
             name=name,
             stroke_width=stroke_width,
+            orientation=orientation,
         )
 
         # ------------------------------------------------
