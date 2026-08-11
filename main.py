@@ -1360,9 +1360,9 @@ async def alpha_svg(
 
 @app.post("/poster/pdf")
 async def poster_pdf(
-    files: list[UploadFile] = File(...),
+    files: List[UploadFile] = File(...),
 
-    name: str = Query("Clara & Ellinor"),
+    name: str = Query("Mine dejlige børnebørn"),
 
     max_dimension: int = Query(
         MAX_DIMENSION,
@@ -1403,14 +1403,10 @@ async def poster_pdf(
         ge=0,
         le=300,
     ),
-
-    # Individuel skalering af hver person
-    scale_level1: int = Query(0, ge=-2, le=2),
-    scale_level2: int = Query(0, ge=-2, le=2),
-    scale_level3: int = Query(0, ge=-2, le=2),
 ):
     try:
 
+        
         # ------------------------------------------------
         # Hjælpefunktion til behandling af én person
         # ------------------------------------------------
