@@ -1042,18 +1042,50 @@ def generate_multi_poster_pdf(
 
             if orientation == "landscape":
 
-                # Alle personer fordeles som én samlet gruppe
-                # mellem venstre og højre designmargin.
+                # ----------------------------------------
+                # 3 PERSONER
+                # ----------------------------------------
+                # Designmarginen gælder silhuettens YDERKANT,
+                # ikke personens center.
 
-                target_center_x = (
-                    width * center_positions[index]
-                )
+                if count == 3:
 
-                x = (
-                    target_center_x
-                    - (draw_w / 2)
-                    - min_x
-                )
+                    if index == 0:
+                        # Første persons venstre yderkant
+                        # = 125 mm fra venstre
+                        x = side_margin - min_x
+
+                    elif index == 1:
+                        # Midterste person centreres
+                        target_center_x = width / 2
+
+                        x = (
+                            target_center_x
+                            - (draw_w / 2)
+                            - min_x
+                        )
+
+                    else:
+                        # Sidste persons højre yderkant
+                        # = 125 mm fra højre
+                        x = (
+                            width
+                            - side_margin
+                            - max_x
+                        )
+
+                else:
+                    # Midlertidigt grid til 4-6 personer.
+                    # Det finjusterer vi efter 3-personers testen.
+                    target_center_x = (
+                        width * center_positions[index]
+                    )
+
+                    x = (
+                        target_center_x
+                        - (draw_w / 2)
+                        - min_x
+                    )
 
             else:
 
