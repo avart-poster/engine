@@ -1105,21 +1105,18 @@ def generate_multi_poster_pdf(
             # SIKKERHED MOD BESKÅRING I SIDERNE
             # --------------------------------------------
 
-            side_margin = 10 * mm
+            side_margin_safety = 10 * mm
 
             left_edge = x + min_x
             right_edge = x + max_x
 
-            # Hvis personen går ud over venstre side
-            if left_edge < side_margin:
-                x += side_margin - left_edge
+            if left_edge < side_margin_safety:
+                x += side_margin_safety - left_edge
 
-            # Beregn højre kant igen efter evt. flytning
             right_edge = x + max_x
 
-            # Hvis personen går ud over højre side
-            if right_edge > width - side_margin:
-                x -= right_edge - (width - side_margin)
+            if right_edge > width - side_margin_safety:
+                x -= right_edge - (width - side_margin_safety)
 
             # --------------------------------------------
             # ALTID FAST I BUNDEN
