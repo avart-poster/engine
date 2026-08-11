@@ -1360,9 +1360,7 @@ async def alpha_svg(
 
 @app.post("/poster/pdf")
 async def poster_pdf(
-    file1: UploadFile = File(...),
-    file2: UploadFile | None = File(None),
-    file3: UploadFile | None = File(None),
+    files: list[UploadFile] = File(...),
 
     name: str = Query("Clara & Ellinor"),
 
@@ -1417,7 +1415,7 @@ async def poster_pdf(
         # Hjælpefunktion til behandling af én person
         # ------------------------------------------------
 
-        def process_person(file):
+                def process_person(file):
 
             rgba = remove_background_if_needed(
                 file,
@@ -1455,96 +1453,25 @@ async def poster_pdf(
             }
 
         # ------------------------------------------------
-        # PERSON 1
+        # PERSONER – 1 TIL 6 FILER
         # ------------------------------------------------
 
-        person1 = process_person(file1)
-
-        persons = [
-            {
-                "svg": person1["svg"],
-                "head_width": person1["head_width"],
-                "scale_level": scale_level1,
-            }
-        ]
-
-        # ------------------------------------------------
-        # PERSON 2
-        # ------------------------------------------------
-
-        if file2 is not None:
-
-            person2 = process_person(file2)
-
-            persons.append(
-                {
-                    "svg": person2["svg"],
-                    "head_width": person2["head_width"],
-                    "scale_level": scale_level2,
-                }
+        if len(files) < 1 or len(files) > 6:
+            raise ValueError(
+                "Upload between 1 and 6 images"
             )
 
-        # ------------------------------------------------
-        # PERSON 3
-        # ------------------------------------------------
+        persons = []
 
-        if file3 is not None:
+        for file in files:
 
-            person3 = process_person(file3)
+            person = process_person(file)
 
             persons.append(
                 {
-                    "svg": person3["svg"],
-                    "head_width": person3["head_width"],
-                    "scale_level": scale_level3,
-                }
-            )
-
-                # ------------------------------------------------
-        # PERSON 4
-        # ------------------------------------------------
-
-        if file4 is not None:
-
-            person4 = process_person(file4)
-
-            persons.append(
-                {
-                    "svg": person4["svg"],
-                    "head_width": person4["head_width"],
-                    "scale_level": scale_level4,
-                }
-            )
-
-        # ------------------------------------------------
-        # PERSON 5
-        # ------------------------------------------------
-
-        if file5 is not None:
-
-            person5 = process_person(file5)
-
-            persons.append(
-                {
-                    "svg": person5["svg"],
-                    "head_width": person5["head_width"],
-                    "scale_level": scale_level5,
-                }
-            )
-
-        # ------------------------------------------------
-        # PERSON 6
-        # ------------------------------------------------
-
-        if file6 is not None:
-
-            person6 = process_person(file6)
-
-            persons.append(
-                {
-                    "svg": person6["svg"],
-                    "head_width": person6["head_width"],
-                    "scale_level": scale_level6,
+                    "svg": person["svg"],
+                    "head_width": person["head_width"],
+                    "scale_level": 0,
                 }
             )
 
@@ -1552,8 +1479,8 @@ async def poster_pdf(
         # AUTOMATISK FORMAT
         # ------------------------------------------------
         #
-        # 1-2 personer = højformat
-        # 3+ personer   = bredformat
+        # 1–2 personer = højformat
+        # 3–6 personer = bredformat
         #
 
         person_count = len(persons)
