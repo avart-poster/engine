@@ -1415,8 +1415,7 @@ async def poster_pdf(
         # Hjælpefunktion til behandling af én person
         # ------------------------------------------------
 
-                def process_person(file):
-
+        def process_person(file):
             rgba = remove_background_if_needed(
                 file,
                 max_dimension=max_dimension,
@@ -1452,6 +1451,7 @@ async def poster_pdf(
                 "head_width": head_width,
             }
 
+        
         # ------------------------------------------------
         # PERSONER – 1 TIL 6 FILER
         # ------------------------------------------------
