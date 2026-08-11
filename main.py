@@ -1036,67 +1036,62 @@ def generate_multi_poster_pdf(
 
 
             
-            # --------------------------------------------
-            # VANDRET PLACERING
-            # --------------------------------------------
+        # --------------------------------------------
+        # VANDRET PLACERING
+        # --------------------------------------------
 
-           if orientation == "landscape":
+        if orientation == "landscape":
 
-    if count == 3:
+            # ----------------------------------------
+            # 3 PERSONER
+            # ----------------------------------------
+            # Bevarer den placering vi allerede har
+            # godkendt visuelt:
+            # yderpersonerne rammer design-marginen,
+            # midterpersonen ligger præcis i centrum.
 
-        if index == 0:
-            x = side_margin - min_x
+            if count == 3:
 
-        elif index == 1:
-            target_center_x = width / 2
+                if index == 0:
+                    x = side_margin - min_x
 
-            x = (
-                target_center_x
-                - (draw_w / 2)
-                - min_x
-            )
+                elif index == 1:
+                    target_center_x = width / 2
 
-        else:
-            x = (
-                width
-                - side_margin
-                - max_x
-            )
+                    x = (
+                        target_center_x
+                        - (draw_w / 2)
+                        - min_x
+                    )
 
-    else:
-        # 4-6 personer:
-        # fordel alle personer jævnt mellem designmarginerne
+                else:
+                    x = (
+                        width
+                        - side_margin
+                        - max_x
+                    )
 
-        usable_width = width - (2 * side_margin)
+            # ----------------------------------------
+            # 4–6 PERSONER
+            # ----------------------------------------
+            # Fordel centrene jævnt inden for
+            # den design-margin der hører til antallet.
 
-        step = usable_width / (count - 1)
-
-        target_center_x = (
-            side_margin
-            + (step * index)
-        )
-
-        x = (
-            target_center_x
-            - (draw_w / 2)
-            - min_x
-        )
-
-else:
-
-    target_center_x = (
-        width * center_positions[index]
-    )
-
-    x = (
-        target_center_x
-        - (draw_w / 2)
-        - min_x
-    )
             else:
 
+                usable_width = (
+                    width
+                    - (2 * side_margin)
+                )
+
+                step = (
+                    usable_width
+                    / (count - 1)
+                )
+
                 target_center_x = (
-                    width * center_positions[index]
+                    side_margin
+                    + (step * index)
                 )
 
                 x = (
@@ -1105,6 +1100,22 @@ else:
                     - min_x
                 )
 
+        else:
+
+            # ----------------------------------------
+            # PORTRAIT: 1–2 PERSONER
+            # ----------------------------------------
+
+            target_center_x = (
+                width
+                * center_positions[index]
+            )
+
+            x = (
+                target_center_x
+                - (draw_w / 2)
+                - min_x
+            )
 
 
             # --------------------------------------------
