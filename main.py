@@ -1500,6 +1500,54 @@ async def poster_pdf(
                 }
             )
 
+                # ------------------------------------------------
+        # PERSON 4
+        # ------------------------------------------------
+
+        if file4 is not None:
+
+            person4 = process_person(file4)
+
+            persons.append(
+                {
+                    "svg": person4["svg"],
+                    "head_width": person4["head_width"],
+                    "scale_level": scale_level4,
+                }
+            )
+
+        # ------------------------------------------------
+        # PERSON 5
+        # ------------------------------------------------
+
+        if file5 is not None:
+
+            person5 = process_person(file5)
+
+            persons.append(
+                {
+                    "svg": person5["svg"],
+                    "head_width": person5["head_width"],
+                    "scale_level": scale_level5,
+                }
+            )
+
+        # ------------------------------------------------
+        # PERSON 6
+        # ------------------------------------------------
+
+        if file6 is not None:
+
+            person6 = process_person(file6)
+
+            persons.append(
+                {
+                    "svg": person6["svg"],
+                    "head_width": person6["head_width"],
+                    "scale_level": scale_level6,
+                }
+            )
+
         # ------------------------------------------------
         # AUTOMATISK FORMAT
         # ------------------------------------------------
