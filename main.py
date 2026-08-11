@@ -1,9 +1,9 @@
-
 from __future__ import annotations
 
 import io
 import os
 import tempfile
+from typing import List
 
 import cv2
 import numpy as np
