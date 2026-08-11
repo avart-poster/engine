@@ -1034,52 +1034,29 @@ def generate_multi_poster_pdf(
 
             draw_w = max_x - min_x
 
-            # --------------------------------------------
-            # VANDRET PLACERING
-            # --------------------------------------------
 
-
+            
             # --------------------------------------------
             # VANDRET PLACERING
             # --------------------------------------------
 
             if orientation == "landscape":
 
-                # Første person:
-                # yderste venstre kant skal ramme design-marginen
-                if index == 0:
-                    x = side_margin - min_x
+                # Alle personer fordeles som én samlet gruppe
+                # mellem venstre og højre designmargin.
 
-                # Sidste person:
-                # yderste højre kant skal ramme design-marginen
-                elif index == count - 1:
-                    x = (
-                        width
-                        - side_margin
-                        - max_x
-                    )
+                target_center_x = (
+                    width * center_positions[index]
+                )
 
-                # Personerne mellem yderpunkterne
-                # fordeles jævnt i det tilgængelige område
-                else:
-                    target_center_x = (
-                        side_margin
-                        + (
-                            (width - (2 * side_margin))
-                            * index
-                            / (count - 1)
-                        )
-                    )
-
-                    x = (
-                        target_center_x
-                        - (draw_w / 2)
-                        - min_x
-                        )
+                x = (
+                    target_center_x
+                    - (draw_w / 2)
+                    - min_x
+                )
 
             else:
 
-                # Portrait: behold vores eksisterende grid
                 target_center_x = (
                     width * center_positions[index]
                 )
