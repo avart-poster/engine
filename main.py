@@ -1040,53 +1040,59 @@ def generate_multi_poster_pdf(
             # VANDRET PLACERING
             # --------------------------------------------
 
-            if orientation == "landscape":
+           if orientation == "landscape":
 
-                # ----------------------------------------
-                # 3 PERSONER
-                # ----------------------------------------
-                # Designmarginen gælder silhuettens YDERKANT,
-                # ikke personens center.
+    if count == 3:
 
-                if count == 3:
+        if index == 0:
+            x = side_margin - min_x
 
-                    if index == 0:
-                        # Første persons venstre yderkant
-                        # = 125 mm fra venstre
-                        x = side_margin - min_x
+        elif index == 1:
+            target_center_x = width / 2
 
-                    elif index == 1:
-                        # Midterste person centreres
-                        target_center_x = width / 2
+            x = (
+                target_center_x
+                - (draw_w / 2)
+                - min_x
+            )
 
-                        x = (
-                            target_center_x
-                            - (draw_w / 2)
-                            - min_x
-                        )
+        else:
+            x = (
+                width
+                - side_margin
+                - max_x
+            )
 
-                    else:
-                        # Sidste persons højre yderkant
-                        # = 125 mm fra højre
-                        x = (
-                            width
-                            - side_margin
-                            - max_x
-                        )
+    else:
+        # 4-6 personer:
+        # fordel alle personer jævnt mellem designmarginerne
 
-                else:
-                    # Midlertidigt grid til 4-6 personer.
-                    # Det finjusterer vi efter 3-personers testen.
-                    target_center_x = (
-                        width * center_positions[index]
-                    )
+        usable_width = width - (2 * side_margin)
 
-                    x = (
-                        target_center_x
-                        - (draw_w / 2)
-                        - min_x
-                    )
+        step = usable_width / (count - 1)
 
+        target_center_x = (
+            side_margin
+            + (step * index)
+        )
+
+        x = (
+            target_center_x
+            - (draw_w / 2)
+            - min_x
+        )
+
+else:
+
+    target_center_x = (
+        width * center_positions[index]
+    )
+
+    x = (
+        target_center_x
+        - (draw_w / 2)
+        - min_x
+    )
             else:
 
                 target_center_x = (
