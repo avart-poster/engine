@@ -8,3 +8,4 @@ svglib
 rembg[cpu]
 onnxruntime
 pillow
+pymupdf
