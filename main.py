@@ -6,6 +6,7 @@ import pymupdf
 
 import cv2
 import numpy as np
+
 from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse, StreamingResponse
@@ -1357,8 +1358,115 @@ async def alpha_svg(
 
 
 
+# ------------------------------------------------
+# FÆLLES POSTER-BYGGER
+# ------------------------------------------------
+
+def build_poster_pdf(
+    files,
+    name,
+    max_dimension,
+    alpha_threshold,
+    smooth,
+    epsilon_ratio,
+    smooth_window,
+    stroke_width,
+    crop_to_subject,
+    pad,
+):
+
+    def process_person(file):
+
+        rgba = remove_background_if_needed(
+            file,
+            max_dimension=max_dimension,
+        )
+
+        h, w = rgba.shape[:2]
+
+        mask = alpha_to_mask(
+            rgba,
+            alpha_threshold=alpha_threshold,
+            smooth=smooth,
+        )
+
+        contour = get_smoothed_outer_contour(
+            mask,
+            epsilon_ratio=epsilon_ratio,
+            smooth_window=smooth_window,
+        )
+
+        head_width = estimate_head_width(contour)
+
+        svg = contour_to_svg(
+            contour=contour,
+            width=w,
+            height=h,
+            stroke_width=stroke_width,
+            crop_to_subject=crop_to_subject,
+            pad=pad,
+        )
+
+        return {
+            "svg": svg,
+            "head_width": head_width,
+        }
+
+    # ------------------------------------------------
+    # 1–6 PERSONER
+    # ------------------------------------------------
+
+    if len(files) < 1 or len(files) > 6:
+        raise ValueError(
+            "Upload between 1 and 6 images"
+        )
+
+    persons = []
+
+    for file in files:
+
+        person = process_person(file)
+
+        persons.append(
+            {
+                "svg": person["svg"],
+                "head_width": person["head_width"],
+                "scale_level": 0,
+            }
+        )
+
+    # ------------------------------------------------
+    # AUTOMATISK FORMAT
+    # ------------------------------------------------
+
+    person_count = len(persons)
+
+    if person_count <= 2:
+        orientation = "portrait"
+    else:
+        orientation = "landscape"
+
+    # ------------------------------------------------
+    # GENERER PDF
+    # ------------------------------------------------
+
+    pdf_bytes = generate_multi_poster_pdf(
+        persons=persons,
+        name=name,
+        stroke_width=stroke_width,
+        orientation=orientation,
+    )
+
+    return pdf_bytes
+
+
+# ====================================================
+# PDF – ENDELIG POSTER
+# ====================================================
+
 @app.post("/poster/pdf")
 async def poster_pdf(
+
     files: Annotated[
         list[UploadFile],
         File(description="Upload 1 to 6 billeder")
@@ -1405,103 +1513,22 @@ async def poster_pdf(
         ge=0,
         le=300,
     ),
+
 ):
     try:
 
-        
-        # ------------------------------------------------
-        # Hjælpefunktion til behandling af én person
-        # ------------------------------------------------
-
-        def process_person(file):
-            rgba = remove_background_if_needed(
-                file,
-                max_dimension=max_dimension,
-            )
-
-            h, w = rgba.shape[:2]
-
-            mask = alpha_to_mask(
-                rgba,
-                alpha_threshold=alpha_threshold,
-                smooth=smooth,
-            )
-
-            contour = get_smoothed_outer_contour(
-                mask,
-                epsilon_ratio=epsilon_ratio,
-                smooth_window=smooth_window,
-            )
-
-            head_width = estimate_head_width(contour)
-
-            svg = contour_to_svg(
-                contour=contour,
-                width=w,
-                height=h,
-                stroke_width=stroke_width,
-                crop_to_subject=crop_to_subject,
-                pad=pad,
-            )
-
-            return {
-                "svg": svg,
-                "head_width": head_width,
-            }
-
-        
-        # ------------------------------------------------
-        # PERSONER – 1 TIL 6 FILER
-        # ------------------------------------------------
-
-        if len(files) < 1 or len(files) > 6:
-            raise ValueError(
-                "Upload between 1 and 6 images"
-            )
-
-        persons = []
-
-        for file in files:
-
-            person = process_person(file)
-
-            persons.append(
-                {
-                    "svg": person["svg"],
-                    "head_width": person["head_width"],
-                    "scale_level": 0,
-                }
-            )
-
-        # ------------------------------------------------
-        # AUTOMATISK FORMAT
-        # ------------------------------------------------
-        #
-        # 1–2 personer = højformat
-        # 3–6 personer = bredformat
-        #
-
-        person_count = len(persons)
-
-        if person_count <= 2:
-            orientation = "portrait"
-        else:
-            orientation = "landscape"
-
-        # ------------------------------------------------
-        # GENERER PDF
-        # ------------------------------------------------
-
-        pdf_bytes = generate_multi_poster_pdf(
-            persons=persons,
+        pdf_bytes = build_poster_pdf(
+            files=files,
             name=name,
+            max_dimension=max_dimension,
+            alpha_threshold=alpha_threshold,
+            smooth=smooth,
+            epsilon_ratio=epsilon_ratio,
+            smooth_window=smooth_window,
             stroke_width=stroke_width,
-            orientation=orientation,
+            crop_to_subject=crop_to_subject,
+            pad=pad,
         )
-
-        # ------------------------------------------------
-        # DOWNLOAD
-        # ------------------------------------------------
 
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
@@ -1510,6 +1537,110 @@ async def poster_pdf(
                 "Content-Disposition":
                 f'attachment; filename="{name}.pdf"'
             },
+        )
+
+    except Exception as e:
+
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400,
+        )
+
+
+# ====================================================
+# PNG – PREVIEW TIL HJEMMESIDEN
+# ====================================================
+
+@app.post("/poster/preview")
+async def poster_preview(
+
+    files: Annotated[
+        list[UploadFile],
+        File(description="Upload 1 to 6 billeder")
+    ],
+
+    name: str = Query("Mine dejlige børnebørn"),
+
+    max_dimension: int = Query(
+        MAX_DIMENSION,
+        ge=600,
+        le=3000,
+    ),
+
+    alpha_threshold: int = Query(
+        1,
+        ge=0,
+        le=255,
+    ),
+
+    smooth: bool = Query(True),
+
+    epsilon_ratio: float = Query(
+        0.00020,
+        ge=0.00005,
+        le=0.02,
+    ),
+
+    smooth_window: int = Query(
+        13,
+        ge=3,
+        le=51,
+    ),
+
+    stroke_width: float = Query(
+        3.5,
+        ge=0.5,
+        le=12.0,
+    ),
+
+    crop_to_subject: bool = Query(True),
+
+    pad: int = Query(
+        30,
+        ge=0,
+        le=300,
+    ),
+
+):
+    try:
+
+        # Lav præcis samme poster som PDF-versionen
+        pdf_bytes = build_poster_pdf(
+            files=files,
+            name=name,
+            max_dimension=max_dimension,
+            alpha_threshold=alpha_threshold,
+            smooth=smooth,
+            epsilon_ratio=epsilon_ratio,
+            smooth_window=smooth_window,
+            stroke_width=stroke_width,
+            crop_to_subject=crop_to_subject,
+            pad=pad,
+        )
+
+        # ------------------------------------------------
+        # PDF → PNG PREVIEW
+        # ------------------------------------------------
+
+        document = pymupdf.open(
+            stream=pdf_bytes,
+            filetype="pdf",
+        )
+
+        page = document[0]
+
+        pixmap = page.get_pixmap(
+            dpi=150,
+            alpha=False,
+        )
+
+        png_bytes = pixmap.tobytes("png")
+
+        document.close()
+
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
         )
 
     except Exception as e:
