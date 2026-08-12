@@ -2,6 +2,7 @@ import io
 import os
 import tempfile
 from typing import Annotated
+import pymupdf
 
 import cv2
 import numpy as np
