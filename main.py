@@ -1,7 +1,7 @@
 import io
 import os
 import tempfile
-from typing import List
+from typing import Annotated
 
 import cv2
 import numpy as np
@@ -1358,7 +1358,10 @@ async def alpha_svg(
 
 @app.post("/poster/pdf")
 async def poster_pdf(
-    files: List[UploadFile] = File(...),
+    files: Annotated[
+        list[UploadFile],
+        File(description="Upload 1 to 6 billeder")
+    ],
 
     name: str = Query("Mine dejlige børnebørn"),
 
