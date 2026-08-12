@@ -1035,28 +1035,57 @@ def generate_multi_poster_pdf(
             draw_w = max_x - min_x
 
 
-            
-        # --------------------------------------------
-        # VANDRET PLACERING
-        # --------------------------------------------
+            # --------------------------------------------
+            # VANDRET PLACERING
+            # --------------------------------------------
 
-        if orientation == "landscape":
+            if orientation == "landscape":
 
-            # ----------------------------------------
-            # 3 PERSONER
-            # ----------------------------------------
-            # Bevarer den placering vi allerede har
-            # godkendt visuelt:
-            # yderpersonerne rammer design-marginen,
-            # midterpersonen ligger præcis i centrum.
+                # ----------------------------------------
+                # 3 PERSONER
+                # ----------------------------------------
+                # Yderpersonernes yderkant følger
+                # designmarginen. Midterpersonen centreres.
 
-            if count == 3:
+                if count == 3:
 
-                if index == 0:
-                    x = side_margin - min_x
+                    if index == 0:
+                        x = side_margin - min_x
 
-                elif index == 1:
-                    target_center_x = width / 2
+                    elif index == 1:
+                        target_center_x = width / 2
+
+                        x = (
+                            target_center_x
+                            - (draw_w / 2)
+                            - min_x
+                        )
+
+                    else:
+                        x = (
+                            width
+                            - side_margin
+                            - max_x
+                        )
+
+                # ----------------------------------------
+                # 4–6 PERSONER
+                # ----------------------------------------
+
+                else:
+
+                    usable_width = (
+                        width - (2 * side_margin)
+                    )
+
+                    step = (
+                        usable_width / (count - 1)
+                    )
+
+                    target_center_x = (
+                        side_margin
+                        + (step * index)
+                    )
 
                     x = (
                         target_center_x
@@ -1064,34 +1093,15 @@ def generate_multi_poster_pdf(
                         - min_x
                     )
 
-                else:
-                    x = (
-                        width
-                        - side_margin
-                        - max_x
-                    )
-
-            # ----------------------------------------
-            # 4–6 PERSONER
-            # ----------------------------------------
-            # Fordel centrene jævnt inden for
-            # den design-margin der hører til antallet.
-
             else:
 
-                usable_width = (
-                    width
-                    - (2 * side_margin)
-                )
-
-                step = (
-                    usable_width
-                    / (count - 1)
-                )
+                # ----------------------------------------
+                # PORTRAIT: 1–2 PERSONER
+                # ----------------------------------------
 
                 target_center_x = (
-                    side_margin
-                    + (step * index)
+                    width
+                    * center_positions[index]
                 )
 
                 x = (
@@ -1099,24 +1109,7 @@ def generate_multi_poster_pdf(
                     - (draw_w / 2)
                     - min_x
                 )
-
-        else:
-
-            # ----------------------------------------
-            # PORTRAIT: 1–2 PERSONER
-            # ----------------------------------------
-
-            target_center_x = (
-                width
-                * center_positions[index]
-            )
-
-            x = (
-                target_center_x
-                - (draw_w / 2)
-                - min_x
-            )
-
+      
 
             # --------------------------------------------
             # SIKKERHED MOD BESKÅRING I SIDERNE
