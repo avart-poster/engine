@@ -1454,6 +1454,128 @@ def build_poster_pdf(
 
 
 # ====================================================
+# PROCESS – BILLEDER → SVG/PERSON-DATA
+# ====================================================
+
+@app.post("/poster/process")
+async def poster_process(
+
+    files: Annotated[
+        list[UploadFile],
+        File(description="Upload 1 to 6 billeder")
+    ],
+
+    max_dimension: int = Query(
+        1200,
+        ge=600,
+        le=2000,
+    ),
+
+    alpha_threshold: int = Query(
+        1,
+        ge=0,
+        le=255,
+    ),
+
+    smooth: bool = Query(True),
+
+    epsilon_ratio: float = Query(
+        0.00020,
+        ge=0.00005,
+        le=0.02,
+    ),
+
+    smooth_window: int = Query(
+        13,
+        ge=3,
+        le=51,
+    ),
+
+    stroke_width: float = Query(
+        3.5,
+        ge=0.5,
+        le=12.0,
+    ),
+
+    crop_to_subject: bool = Query(True),
+
+    pad: int = Query(
+        30,
+        ge=0,
+        le=300,
+    ),
+
+):
+    try:
+
+        if len(files) < 1 or len(files) > 6:
+            raise ValueError(
+                "Upload between 1 and 6 images"
+            )
+
+        persons = []
+
+        for index, file in enumerate(files):
+
+            rgba = remove_background_if_needed(
+                file,
+                max_dimension=max_dimension,
+            )
+
+            h, w = rgba.shape[:2]
+
+            mask = alpha_to_mask(
+                rgba,
+                alpha_threshold=alpha_threshold,
+                smooth=smooth,
+            )
+
+            contour = get_smoothed_outer_contour(
+                mask,
+                epsilon_ratio=epsilon_ratio,
+                smooth_window=smooth_window,
+            )
+
+            head_width = estimate_head_width(
+                contour
+            )
+
+            svg = contour_to_svg(
+                contour=contour,
+                width=w,
+                height=h,
+                stroke_width=stroke_width,
+                crop_to_subject=crop_to_subject,
+                pad=pad,
+            )
+
+            persons.append(
+                {
+                    "index": index,
+                    "svg": svg,
+                    "head_width": head_width,
+                    "scale_level": 0,
+                    "flip": False,
+                }
+            )
+
+        return JSONResponse(
+            {
+                "count": len(persons),
+                "persons": persons,
+            }
+        )
+
+    except Exception as e:
+
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400,
+        )
+
+
+
+# ====================================================
 # PDF – ENDELIG POSTER
 # ====================================================
 
