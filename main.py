@@ -1593,8 +1593,31 @@ async def poster_render(
 
         name = data.get(
             "name",
-            "Mine dejlige børnebørn",
+            "",
         )
+
+        # ---------------------------------------------
+        # STYLE
+        # ---------------------------------------------
+
+        style = data.get(
+            "style",
+            "beige_stroke",
+        )
+
+        allowed_styles = {
+            "taupe_stroke",
+            "beige_stroke",
+            "burn_stroke",
+            "dark_stroke",
+            "beige_block",
+            "grey_block",
+        }
+
+        if style not in allowed_styles:
+            raise ValueError(
+                f"Unknown poster style: {style}"
+            )
 
         # ---------------------------------------------
         # BYG PERSON-LISTE
@@ -1625,6 +1648,7 @@ async def poster_render(
                 }
             )
 
+        
         # ---------------------------------------------
         # FORMAT
         # ---------------------------------------------
