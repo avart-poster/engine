@@ -1574,6 +1574,116 @@ async def poster_process(
         )
 
 
+@app.post("/poster/render")
+async def poster_render(
+    data: dict,
+):
+    try:
+
+        # ---------------------------------------------
+        # DATA FRA /poster/process
+        # ---------------------------------------------
+
+        persons_data = data.get("persons", [])
+
+        if len(persons_data) < 1 or len(persons_data) > 6:
+            raise ValueError(
+                "Render requires between 1 and 6 persons"
+            )
+
+        name = data.get(
+            "name",
+            "Mine dejlige børnebørn",
+        )
+
+        # ---------------------------------------------
+        # BYG PERSON-LISTE
+        # ---------------------------------------------
+
+        persons = []
+
+        for person in persons_data:
+
+            svg = person.get("svg")
+
+            if not svg:
+                raise ValueError(
+                    "Person is missing SVG data"
+                )
+
+            persons.append(
+                {
+                    "svg": svg,
+                    "head_width": person.get(
+                        "head_width",
+                        0,
+                    ),
+                    "scale_level": person.get(
+                        "scale_level",
+                        0,
+                    ),
+                }
+            )
+
+        # ---------------------------------------------
+        # FORMAT
+        # ---------------------------------------------
+
+        if len(persons) <= 2:
+            orientation = "portrait"
+        else:
+            orientation = "landscape"
+
+        # ---------------------------------------------
+        # GENERER POSTER FRA DE ALLEREDE
+        # BEHANDLEDE SVG'ER
+        # ---------------------------------------------
+
+        pdf_bytes = generate_multi_poster_pdf(
+            persons=persons,
+            name=name,
+            stroke_width=DEFAULT_STROKE_WIDTH,
+            orientation=orientation,
+        )
+
+        # ---------------------------------------------
+        # PDF → PNG PREVIEW
+        # ---------------------------------------------
+
+        document = pymupdf.open(
+            stream=pdf_bytes,
+            filetype="pdf",
+        )
+
+        page = document[0]
+
+        pixmap = page.get_pixmap(
+            dpi=150,
+            alpha=False,
+        )
+
+        png_bytes = pixmap.tobytes("png")
+
+        document.close()
+
+        # ---------------------------------------------
+        # SEND PNG TIL WEBSITE
+        # ---------------------------------------------
+
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+        )
+
+    except Exception as e:
+
+        return JSONResponse(
+            {
+                "error": str(e)
+            },
+            status_code=400,
+        )
+
 
 # ====================================================
 # PDF – ENDELIG POSTER
