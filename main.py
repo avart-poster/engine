@@ -737,6 +737,7 @@ def generate_multi_poster_pdf(
     name: str,
     stroke_width: float = DEFAULT_STROKE_WIDTH,
     orientation: str = "portrait",
+    style: str = "beige_stroke",
 ) -> bytes:
 
     # ------------------------------------------------
@@ -1832,10 +1833,12 @@ async def poster_pdf(
 
     except Exception as e:
 
-        return JSONResponse(
-            {"error": str(e)},
-            status_code=400,
-        )
+    return JSONResponse(
+        {
+            "error": str(e)
+        },
+        status_code=400,
+    )
 
 
 # ====================================================
@@ -1936,7 +1939,9 @@ async def poster_preview(
 
     except Exception as e:
 
-        return JSONResponse(
-            {"error": str(e)},
-            status_code=400,
-        )
+    return JSONResponse(
+        {
+            "error": str(e)
+        },
+        status_code=400,
+    )
