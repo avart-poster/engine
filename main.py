@@ -1168,6 +1168,43 @@ def generate_multi_poster_pdf(
                 logo_path
             )
 
+# --------------------------------------------
+# LOGOFARVE EFTER STYLE
+# --------------------------------------------
+
+if style in (
+    "taupe_stroke",
+    "burn_stroke",
+    "dark_stroke",
+):
+    logo_color = colors.white
+else:
+    logo_color = colors.black
+
+
+def recolor_logo(node):
+
+    # Ændr kun eksisterende fills
+    if (
+        hasattr(node, "fillColor")
+        and node.fillColor is not None
+    ):
+        node.fillColor = logo_color
+
+    # Ændr kun eksisterende strokes
+    if (
+        hasattr(node, "strokeColor")
+        and node.strokeColor is not None
+    ):
+        node.strokeColor = logo_color
+
+    if hasattr(node, "contents"):
+        for child in node.contents:
+            recolor_logo(child)
+
+
+recolor_logo(logo)
+            
             if logo is not None and logo.width > 0:
 
                 logo_scale = (
