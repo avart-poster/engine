@@ -1162,82 +1162,80 @@ def generate_multi_poster_pdf(
 
         logo_path = "assets/avart-logo.svg"
 
-        if os.path.exists(logo_path):
+if os.path.exists(logo_path):
 
-    logo = svg2rlg(
-        logo_path
-    )
-
-    # --------------------------------------------
-    # LOGOFARVE EFTER STYLE
-    # --------------------------------------------
-
-    if style in (
-        "taupe_stroke",
-        "burn_stroke",
-        "dark_stroke",
-    ):
-        logo_color = colors.white
-    else:
-        logo_color = colors.black
-
-
-    def recolor_logo(node):
-
-        if (
-            hasattr(node, "fillColor")
-            and node.fillColor is not None
-        ):
-            node.fillColor = logo_color
-
-        if (
-            hasattr(node, "strokeColor")
-            and node.strokeColor is not None
-        ):
-            node.strokeColor = logo_color
-
-        if hasattr(node, "contents"):
-            for child in node.contents:
-                recolor_logo(child)
-
-
-    recolor_logo(logo)
-
-    if logo is not None and logo.width > 0:
-
-        logo_scale = (
-            logo_width / logo.width
+        logo = svg2rlg(
+            logo_path
         )
-                logo.scale(
-                    logo_scale,
-                    logo_scale,
-                )
-
-                (
-                    logo_min_x,
-                    logo_min_y,
-                    logo_max_x,
-                    logo_max_y,
-                ) = logo.getBounds()
-
-                rendered_logo_width = (
-                    logo_max_x - logo_min_x
-                )
-
-                logo_x = (
-                    width - rendered_logo_width
-                ) / 2 - logo_min_x
-
-                logo_y = (
-                    logo_bottom - logo_min_y
-                )
-
-                renderPDF.draw(
-                    logo,
-                    c,
-                    logo_x,
-                    logo_y,
-                )
+    
+        # --------------------------------------------
+        # LOGOFARVE EFTER STYLE
+        # --------------------------------------------
+    
+        if style in (
+            "taupe_stroke",
+            "burn_stroke",
+            "dark_stroke",
+        ):
+            logo_color = colors.white
+        else:
+            logo_color = colors.black
+    
+        def recolor_logo(node):
+    
+            if (
+                hasattr(node, "fillColor")
+                and node.fillColor is not None
+            ):
+                node.fillColor = logo_color
+    
+            if (
+                hasattr(node, "strokeColor")
+                and node.strokeColor is not None
+            ):
+                node.strokeColor = logo_color
+    
+            if hasattr(node, "contents"):
+                for child in node.contents:
+                    recolor_logo(child)
+    
+        recolor_logo(logo)
+    
+        if logo is not None and logo.width > 0:
+    
+            logo_scale = (
+                logo_width / logo.width
+            )
+                    logo.scale(
+                        logo_scale,
+                        logo_scale,
+                    )
+    
+                    (
+                        logo_min_x,
+                        logo_min_y,
+                        logo_max_x,
+                        logo_max_y,
+                    ) = logo.getBounds()
+    
+                    rendered_logo_width = (
+                        logo_max_x - logo_min_x
+                    )
+    
+                    logo_x = (
+                        width - rendered_logo_width
+                    ) / 2 - logo_min_x
+    
+                    logo_y = (
+                        logo_bottom - logo_min_y
+                    )
+    
+                    renderPDF.draw(
+                        logo,
+                        c,
+                        logo_x,
+                        logo_y,
+                    )
 
         c.showPage()
         c.save()
