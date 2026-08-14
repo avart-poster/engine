@@ -1164,53 +1164,50 @@ def generate_multi_poster_pdf(
 
         if os.path.exists(logo_path):
 
-            logo = svg2rlg(
-                logo_path
-            )
+    logo = svg2rlg(
+        logo_path
+    )
 
-# --------------------------------------------
-# LOGOFARVE EFTER STYLE
-# --------------------------------------------
+    # --------------------------------------------
+    # LOGOFARVE EFTER STYLE
+    # --------------------------------------------
 
-if style in (
-    "taupe_stroke",
-    "burn_stroke",
-    "dark_stroke",
-):
-    logo_color = colors.white
-else:
-    logo_color = colors.black
-
-
-def recolor_logo(node):
-
-    # Ændr kun eksisterende fills
-    if (
-        hasattr(node, "fillColor")
-        and node.fillColor is not None
+    if style in (
+        "taupe_stroke",
+        "burn_stroke",
+        "dark_stroke",
     ):
-        node.fillColor = logo_color
-
-    # Ændr kun eksisterende strokes
-    if (
-        hasattr(node, "strokeColor")
-        and node.strokeColor is not None
-    ):
-        node.strokeColor = logo_color
-
-    if hasattr(node, "contents"):
-        for child in node.contents:
-            recolor_logo(child)
+        logo_color = colors.white
+    else:
+        logo_color = colors.black
 
 
-recolor_logo(logo)
-            
-            if logo is not None and logo.width > 0:
+    def recolor_logo(node):
 
-                logo_scale = (
-                    logo_width / logo.width
-                )
+        if (
+            hasattr(node, "fillColor")
+            and node.fillColor is not None
+        ):
+            node.fillColor = logo_color
 
+        if (
+            hasattr(node, "strokeColor")
+            and node.strokeColor is not None
+        ):
+            node.strokeColor = logo_color
+
+        if hasattr(node, "contents"):
+            for child in node.contents:
+                recolor_logo(child)
+
+
+    recolor_logo(logo)
+
+    if logo is not None and logo.width > 0:
+
+        logo_scale = (
+            logo_width / logo.width
+        )
                 logo.scale(
                     logo_scale,
                     logo_scale,
