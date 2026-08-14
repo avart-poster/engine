@@ -1485,10 +1485,11 @@ def build_poster_pdf(
     # ------------------------------------------------
 
     pdf_bytes = generate_multi_poster_pdf(
-        persons=persons,
-        name=name,
-        stroke_width=stroke_width,
-        orientation=orientation,
+    persons=persons,
+    name=name,
+    stroke_width=DEFAULT_STROKE_WIDTH,
+    orientation=orientation,
+    style=style,
     )
 
     return pdf_bytes
