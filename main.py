@@ -1833,12 +1833,12 @@ async def poster_pdf(
 
     except Exception as e:
 
-    return JSONResponse(
-        {
-            "error": str(e)
-        },
-        status_code=400,
-    )
+        return JSONResponse(
+            {
+                "error": str(e)
+            },
+            status_code=400,
+        )
 
 
 # ====================================================
