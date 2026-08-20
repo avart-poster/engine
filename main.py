@@ -741,6 +741,19 @@ def generate_multi_poster_pdf(
 ) -> bytes:
 
     # ------------------------------------------------
+    # STYLE / FARVER
+    # ------------------------------------------------
+
+    if style == "dark":
+        bg_color = colors.HexColor("#2B2B2B")
+        fg_color = colors.HexColor("#EFEEEC")
+    else:
+        # LIGHT er standard
+        bg_color = colors.HexColor("#EFEEEC")
+        fg_color = colors.HexColor("#2B2B2B")
+    
+
+    # ------------------------------------------------
     # SIDEFORMAT / ORIENTATION
     # ------------------------------------------------
 
@@ -916,7 +929,7 @@ def generate_multi_poster_pdf(
     )
 
     # Baggrund
-    c.setFillColorRGB(*BG_COLOR)
+    c.setFillColor(bg_color)
     c.rect(
         0,
         0,
@@ -930,7 +943,7 @@ def generate_multi_poster_pdf(
     # TITEL
     # ------------------------------------------------
 
-    c.setFillColorRGB(0, 0, 0)
+    c.setFillColor(fg_color)
 
     c.setFont(
         TITLE_FONT,
