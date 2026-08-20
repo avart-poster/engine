@@ -999,6 +999,26 @@ def generate_multi_poster_pdf(
                     f"Could not convert person {index + 1} SVG"
                 )
 
+
+            # ----------------------------------------
+            # STROKE EFTER STYLE
+            # ----------------------------------------
+
+            def recolor_person(node):
+
+                if (
+                    hasattr(node, "strokeColor")
+                    and node.strokeColor is not None
+                ):
+                    node.strokeColor = fg_color
+
+                if hasattr(node, "contents"):
+                    for child in node.contents:
+                        recolor_person(child)
+
+            recolor_person(drawing)
+
+            
             # --------------------------------------------
             # Oprindelige mål
             # --------------------------------------------
