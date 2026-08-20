@@ -1939,9 +1939,9 @@ async def poster_preview(
 
     except Exception as e:
 
-    return JSONResponse(
-        {
-            "error": str(e)
-        },
-        status_code=400,
-    )
+        return JSONResponse(
+            {
+                "error": str(e)
+            },
+            status_code=400,
+        )
