@@ -1227,7 +1227,7 @@ def generate_multi_poster_pdf(
                 # LOGOFARVE EFTER STYLE
                 # ----------------------------------------
 
-               if style == "dark":
+                if style == "dark":
                     logo_color = colors.HexColor("#EFEEEC")
                 else:
                     logo_color = colors.HexColor("#2B2B2B")
