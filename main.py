@@ -1227,14 +1227,10 @@ def generate_multi_poster_pdf(
                 # LOGOFARVE EFTER STYLE
                 # ----------------------------------------
 
-                if style in (
-                    "taupe_stroke",
-                    "burn_stroke",
-                    "dark_stroke",
-                ):
-                    logo_color = colors.white
+               if style == "dark":
+                    logo_color = colors.HexColor("#EFEEEC")
                 else:
-                    logo_color = colors.black
+                    logo_color = colors.HexColor("#2B2B2B")
 
                 def recolor_logo(node):
 
