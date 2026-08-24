@@ -681,6 +681,25 @@ def generate_poster_pdf(
         if os.path.exists(logo_path):
             logo = svg2rlg(logo_path)
 
+        # Logo følger posterens style
+        if logo is not None:
+            logo_color = colors.HexColor(
+                "#EEE7DC" if style == "dark" else "#2B2B2B"
+            )
+        
+            def recolor_logo(node):
+                if hasattr(node, "fillColor") and node.fillColor is not None:
+                    node.fillColor = logo_color
+        
+                if hasattr(node, "strokeColor") and node.strokeColor is not None:
+                    node.strokeColor = logo_color
+        
+                if hasattr(node, "contents"):
+                    for child in node.contents:
+                        recolor_logo(child)
+        
+            recolor_logo(logo)
+            
             if logo is not None and logo.width > 0:
                 logo_scale = logo_width / logo.width
 
