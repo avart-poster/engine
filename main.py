@@ -1678,16 +1678,12 @@ async def poster_render(
 
         style = data.get(
             "style",
-            "beige_stroke",
+            "light",
         )
-
+        
         allowed_styles = {
-            "taupe_stroke",
-            "beige_stroke",
-            "burn_stroke",
-            "dark_stroke",
-            "beige_block",
-            "grey_block",
+            "light",
+            "dark",
         }
 
         if style not in allowed_styles:
@@ -1744,6 +1740,7 @@ async def poster_render(
             name=name,
             stroke_width=DEFAULT_STROKE_WIDTH,
             orientation=orientation,
+            style=style,
         )
 
         # ---------------------------------------------
