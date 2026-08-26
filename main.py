@@ -796,11 +796,11 @@ def generate_multi_poster_pdf(
     # ------------------------------------------------
 
     if orientation == "landscape":
-    page_w_mm = max(base_w_mm, base_h_mm)
-    page_h_mm = min(base_w_mm, base_h_mm)
+        page_w_mm = max(base_w_mm, base_h_mm)
+        page_h_mm = min(base_w_mm, base_h_mm)
     else:
-    page_w_mm = min(base_w_mm, base_h_mm)
-    page_h_mm = max(base_w_mm, base_h_mm)
+        page_w_mm = min(base_w_mm, base_h_mm)
+        page_h_mm = max(base_w_mm, base_h_mm)
 
     width = page_w_mm * mm
     height = page_h_mm * mm
