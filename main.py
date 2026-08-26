@@ -756,7 +756,8 @@ def generate_multi_poster_pdf(
     name: str,
     stroke_width: float = DEFAULT_STROKE_WIDTH,
     orientation: str = "portrait",
-    style: str = "beige_stroke",
+    style: str = "light",
+    size: str = "50x70",
 ) -> bytes:
 
     # ------------------------------------------------
@@ -773,15 +774,33 @@ def generate_multi_poster_pdf(
     
 
     # ------------------------------------------------
+    # SIZE / FYSISK FORMAT
+    # ------------------------------------------------
+
+    size_dimensions = {
+        "a3": (297, 420),
+        "a2": (420, 594),
+        "50x70": (500, 700),
+        "a1": (594, 841),
+    }
+
+    if size not in size_dimensions:
+        raise ValueError(
+            f"Unknown poster size: {size}"
+        )
+
+    base_w_mm, base_h_mm = size_dimensions[size]
+    
+    # ------------------------------------------------
     # SIDEFORMAT / ORIENTATION
     # ------------------------------------------------
 
     if orientation == "landscape":
-        page_w_mm = max(PAGE_W_MM, PAGE_H_MM)
-        page_h_mm = min(PAGE_W_MM, PAGE_H_MM)
+    page_w_mm = max(base_w_mm, base_h_mm)
+    page_h_mm = min(base_w_mm, base_h_mm)
     else:
-        page_w_mm = min(PAGE_W_MM, PAGE_H_MM)
-        page_h_mm = max(PAGE_W_MM, PAGE_H_MM)
+    page_w_mm = min(base_w_mm, base_h_mm)
+    page_h_mm = max(base_w_mm, base_h_mm)
 
     width = page_w_mm * mm
     height = page_h_mm * mm
@@ -1704,6 +1723,27 @@ async def poster_render(
         if style not in allowed_styles:
             raise ValueError(
                 f"Unknown poster style: {style}"
+            )
+
+        # ---------------------------------------------
+        # SIZE
+        # ---------------------------------------------
+
+        size = data.get(
+            "size",
+            "50x70",
+        )
+
+        allowed_sizes = {
+            "a3",
+            "a2",
+            "50x70",
+            "a1",
+        }
+
+        if size not in allowed_sizes:
+            raise ValueError(
+                f"Unknown poster size: {size}"
             )
 
         # ---------------------------------------------
