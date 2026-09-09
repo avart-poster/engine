@@ -769,8 +769,8 @@ def generate_multi_poster_pdf(
         bg_color = colors.HexColor("#2B2B2B")
         fg_color = colors.HexColor("#EFEEEC")
     else:
-        # LIGHT er standard
-        bg_color = colors.HexColor("#EFEEEC")
+        # LIGHT har ingen baggrund i selve PDF'en
+        bg_color = None
         fg_color = colors.HexColor("#2B2B2B")
     
 
@@ -968,15 +968,19 @@ def generate_multi_poster_pdf(
     )
 
     # Baggrund
-    c.setFillColor(bg_color)
-    c.rect(
-        0,
-        0,
-        width,
-        height,
-        fill=1,
-        stroke=0,
-    )
+    # DARK får fysisk baggrund i PDF'en.
+    # LIGHT forbliver transparent.
+    
+    if bg_color is not None:
+        c.setFillColor(bg_color)
+        c.rect(
+            0,
+            0,
+            width,
+            height,
+            fill=1,
+            stroke=0,
+        )
 
     # ------------------------------------------------
     # TITEL
