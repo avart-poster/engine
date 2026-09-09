@@ -1807,7 +1807,9 @@ async def poster_render(
             stream=pdf_bytes,
             filetype="pdf",
         )
-
+        
+        page = document[0]
+        
         pixmap = page.get_pixmap(
             dpi=150,
             alpha=True,
