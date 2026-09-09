@@ -1808,14 +1808,36 @@ async def poster_render(
             filetype="pdf",
         )
 
-        page = document[0]
-
         pixmap = page.get_pixmap(
             dpi=150,
-            alpha=False,
+            alpha=True,
         )
-
-        png_bytes = pixmap.tobytes("png")
+        
+        # Transparent PDF → PNG
+        preview_rgba = Image.open(
+            io.BytesIO(pixmap.tobytes("png"))
+        ).convert("RGBA")
+        
+        # LIGHT baggrund kun til preview på hjemmesiden
+        preview_background = Image.new(
+            "RGBA",
+            preview_rgba.size,
+            "#F9F8F4",
+        )
+        
+        preview_image = Image.alpha_composite(
+            preview_background,
+            preview_rgba,
+        ).convert("RGB")
+        
+        preview_buffer = io.BytesIO()
+        
+        preview_image.save(
+            preview_buffer,
+            format="PNG",
+        )
+        
+        png_bytes = preview_buffer.getvalue()
 
         document.close()
 
