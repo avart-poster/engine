@@ -1225,16 +1225,14 @@ def generate_multi_poster_pdf(
                 y,
             )
             
-            # Spejlvend kun den valgte person
             if flipped:
-                c.translate(
+                c.transform(
+                    -1,
+                    0,
+                    0,
+                    1,
                     min_x + max_x,
                     0,
-                )
-            
-                c.scale(
-                    -1,
-                    1,
                 )
             
             renderPDF.draw(
