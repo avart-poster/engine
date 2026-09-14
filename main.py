@@ -1008,9 +1008,10 @@ def generate_multi_poster_pdf(
         # ------------------------------------------------
 
         for index, person in enumerate(persons):
-
+        
             svg_string = person["svg"]
             scale_level = person.get("scale_level", 0)
+            flipped = person.get("flipped", False)
 
             if scale_level not in top_positions_mm:
                 raise ValueError(
@@ -1218,19 +1219,31 @@ def generate_multi_poster_pdf(
             # --------------------------------------------
 
             c.saveState()
-
+            
             c.translate(
                 x,
                 y,
             )
-
+            
+            # Spejlvend kun den valgte person
+            if flipped:
+                c.translate(
+                    min_x + max_x,
+                    0,
+                )
+            
+                c.scale(
+                    -1,
+                    1,
+                )
+            
             renderPDF.draw(
                 drawing,
                 c,
                 0,
                 0,
             )
-
+            
             c.restoreState()
 
         # ------------------------------------------------
@@ -1776,6 +1789,10 @@ async def poster_render(
                     "scale_level": person.get(
                         "scale_level",
                         0,
+                    ),
+                    "flipped": person.get(
+                        "flipped",
+                        False,
                     ),
                 }
             )
