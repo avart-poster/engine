@@ -169,59 +169,59 @@ if img is None:
         )
 
     
-        # Hvis upload allerede har ægte transparency
-        if len(img.shape) == 3 and img.shape[2] == 4:
-            alpha = img[:, :, 3]
-            if np.any(alpha < 250):
-                rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-                rgba = resize_if_needed_rgba(rgba, max_dimension=max_dimension)
-                rgba = cv2.copyMakeBorder(
-                    rgba, 0, 180, 0, 0,
-                    cv2.BORDER_CONSTANT,
-                    value=(0, 0, 0, 0),
-                )
-                return rgba
+    # Hvis upload allerede har ægte transparency
+    if len(img.shape) == 3 and img.shape[2] == 4:
+        alpha = img[:, :, 3]
+        if np.any(alpha < 250):
+            rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+            rgba = resize_if_needed_rgba(rgba, max_dimension=max_dimension)
+            rgba = cv2.copyMakeBorder(
+                rgba, 0, 180, 0, 0,
+                cv2.BORDER_CONSTANT,
+                value=(0, 0, 0, 0),
+            )
+            return rgba
     
-        # Resize før rembg for stabilitet
-        max_input_size = 1600
-        h, w = img.shape[:2]
-        scale = min(1.0, max_input_size / max(h, w))
+    # Resize før rembg for stabilitet
+    max_input_size = 1600
+    h, w = img.shape[:2]
+    scale = min(1.0, max_input_size / max(h, w))
     
-        if scale < 1.0:
-            new_w = int(w * scale)
-            new_h = int(h * scale)
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    if scale < 1.0:
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
     
-            ok, buffer = cv2.imencode(".png", img)
-            if not ok:
-                raise ValueError("Could not encode resized image")
+        ok, buffer = cv2.imencode(".png", img)
+        if not ok:
+            raise ValueError("Could not encode resized image")
     
-            data = buffer.tobytes()
+        data = buffer.tobytes()
     
-        output = remove(data, session=get_rembg_session())
+    output = remove(data, session=get_rembg_session())
     
-        arr_out = np.frombuffer(output, np.uint8)
-        img_out = cv2.imdecode(arr_out, cv2.IMREAD_UNCHANGED)
+    arr_out = np.frombuffer(output, np.uint8)
+    img_out = cv2.imdecode(arr_out, cv2.IMREAD_UNCHANGED)
     
-        if img_out is None:
-            raise ValueError("Background removal failed")
+    if img_out is None:
+        raise ValueError("Background removal failed")
     
-        if len(img_out.shape) == 3 and img_out.shape[2] == 3:
-            alpha = np.full((img_out.shape[0], img_out.shape[1], 1), 255, dtype=np.uint8)
-            img_out = np.concatenate([img_out, alpha], axis=2)
+    if len(img_out.shape) == 3 and img_out.shape[2] == 3:
+        alpha = np.full((img_out.shape[0], img_out.shape[1], 1), 255, dtype=np.uint8)
+        img_out = np.concatenate([img_out, alpha], axis=2)
     
-        if len(img_out.shape) != 3 or img_out.shape[2] != 4:
-            raise ValueError("Background removal did not return RGBA")
+    if len(img_out.shape) != 3 or img_out.shape[2] != 4:
+        raise ValueError("Background removal did not return RGBA")
     
-        # ekstra transparent bund, så contour kan gå helt ned
-        img_out = cv2.copyMakeBorder(
-            img_out, 0, 180, 0, 0,
-            cv2.BORDER_CONSTANT,
-            value=(0, 0, 0, 0),
-        )
+    # ekstra transparent bund, så contour kan gå helt ned
+    img_out = cv2.copyMakeBorder(
+        img_out, 0, 180, 0, 0,
+        cv2.BORDER_CONSTANT,
+        value=(0, 0, 0, 0),
+    )
     
-        rgba = cv2.cvtColor(img_out, cv2.COLOR_BGRA2RGBA)
-        return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
+    rgba = cv2.cvtColor(img_out, cv2.COLOR_BGRA2RGBA)
+    return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
 
 
 def alpha_to_mask(
