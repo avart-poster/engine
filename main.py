@@ -1,9 +1,11 @@
 import io
 import os
 import tempfile
+
 from typing import Annotated
 import pymupdf
 from PIL import Image
+from pillow_heif import register_heif_opener
 
 import cv2
 import numpy as np
@@ -21,6 +23,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.graphics import renderPDF
 
 from svglib.svglib import svg2rlg
+register_heif_opener()
 
 pdfmetrics.registerFont(
     TTFont("The Seasons Bold", "assets/The Seasons Bold.ttf")
@@ -127,15 +130,45 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
 
 def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIMENSION) -> np.ndarray:
     data = upload.file.read()
-    if not data:
-        raise ValueError("Empty file")
+if not data:
+    raise ValueError("Empty file")
 
-    arr = np.frombuffer(data, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+# --------------------------------------------------
+# ÅBN BILLEDE
+# JPEG / PNG / WEBP via OpenCV
+# HEIC / HEIF via Pillow + pillow-heif
+# --------------------------------------------------
 
-    if img is None:
-        raise ValueError("Could not decode image")
+arr = np.frombuffer(data, np.uint8)
+img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
 
+# Hvis OpenCV ikke kan læse filen,
+# prøv Pillow. pillow-heif gør HEIC/HEIF tilgængelig her.
+if img is None:
+    try:
+        pil_image = Image.open(io.BytesIO(data))
+        pil_image.load()
+
+        # Bevar transparency hvis billedet har alpha
+        if "A" in pil_image.getbands():
+            pil_image = pil_image.convert("RGBA")
+            img = cv2.cvtColor(
+                np.array(pil_image),
+                cv2.COLOR_RGBA2BGRA,
+            )
+        else:
+            pil_image = pil_image.convert("RGB")
+            img = cv2.cvtColor(
+                np.array(pil_image),
+                cv2.COLOR_RGB2BGR,
+            )
+
+    except Exception as e:
+        raise ValueError(
+            f"Could not decode image: {e}"
+        )
+
+    
     # Hvis upload allerede har ægte transparency
     if len(img.shape) == 3 and img.shape[2] == 4:
         alpha = img[:, :, 3]
