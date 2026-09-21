@@ -130,98 +130,142 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
 
 def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIMENSION) -> np.ndarray:
     data = upload.file.read()
-if not data:
-    raise ValueError("Empty file")
 
-# --------------------------------------------------
-# ÅBN BILLEDE
-# JPEG / PNG / WEBP via OpenCV
-# HEIC / HEIF via Pillow + pillow-heif
-# --------------------------------------------------
+    if not data:
+        raise ValueError("Empty file")
 
-arr = np.frombuffer(data, np.uint8)
-img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+    # --------------------------------------------------
+    # ÅBN BILLEDE
+    # JPEG / PNG / WEBP via OpenCV
+    # HEIC / HEIF via Pillow + pillow-heif
+    # --------------------------------------------------
 
-# Hvis OpenCV ikke kan læse filen,
-# prøv Pillow. pillow-heif gør HEIC/HEIF tilgængelig her.
-if img is None:
-    try:
-        pil_image = Image.open(io.BytesIO(data))
-        pil_image.load()
+    arr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
 
-        # Bevar transparency hvis billedet har alpha
-        if "A" in pil_image.getbands():
-            pil_image = pil_image.convert("RGBA")
-            img = cv2.cvtColor(
-                np.array(pil_image),
-                cv2.COLOR_RGBA2BGRA,
+    # Hvis OpenCV ikke kan læse filen,
+    # prøv Pillow. pillow-heif gør HEIC/HEIF tilgængelig her.
+    if img is None:
+        try:
+            pil_image = Image.open(io.BytesIO(data))
+            pil_image.load()
+
+            # Bevar transparency hvis billedet har alpha
+            if "A" in pil_image.getbands():
+                pil_image = pil_image.convert("RGBA")
+                img = cv2.cvtColor(
+                    np.array(pil_image),
+                    cv2.COLOR_RGBA2BGRA,
+                )
+            else:
+                pil_image = pil_image.convert("RGB")
+                img = cv2.cvtColor(
+                    np.array(pil_image),
+                    cv2.COLOR_RGB2BGR,
+                )
+
+        except Exception as e:
+            raise ValueError(
+                f"Could not decode image: {e}"
             )
-        else:
-            pil_image = pil_image.convert("RGB")
-            img = cv2.cvtColor(
-                np.array(pil_image),
-                cv2.COLOR_RGB2BGR,
-            )
 
-    except Exception as e:
-        raise ValueError(
-            f"Could not decode image: {e}"
-        )
-
-    
     # Hvis upload allerede har ægte transparency
     if len(img.shape) == 3 and img.shape[2] == 4:
         alpha = img[:, :, 3]
+
         if np.any(alpha < 250):
             rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-            rgba = resize_if_needed_rgba(rgba, max_dimension=max_dimension)
+            rgba = resize_if_needed_rgba(
+                rgba,
+                max_dimension=max_dimension,
+            )
+
             rgba = cv2.copyMakeBorder(
-                rgba, 0, 180, 0, 0,
+                rgba,
+                0,
+                180,
+                0,
+                0,
                 cv2.BORDER_CONSTANT,
                 value=(0, 0, 0, 0),
             )
+
             return rgba
-    
+
     # Resize før rembg for stabilitet
     max_input_size = 1600
     h, w = img.shape[:2]
     scale = min(1.0, max_input_size / max(h, w))
-    
+
     if scale < 1.0:
         new_w = int(w * scale)
         new_h = int(h * scale)
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    
-        ok, buffer = cv2.imencode(".png", img)
-        if not ok:
-            raise ValueError("Could not encode resized image")
-    
-        data = buffer.tobytes()
-    
-    output = remove(data, session=get_rembg_session())
-    
+
+        img = cv2.resize(
+            img,
+            (new_w, new_h),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    # Konverter altid til PNG før rembg
+    ok, buffer = cv2.imencode(".png", img)
+
+    if not ok:
+        raise ValueError("Could not encode resized image")
+
+    data = buffer.tobytes()
+
+    output = remove(
+        data,
+        session=get_rembg_session(),
+    )
+
     arr_out = np.frombuffer(output, np.uint8)
-    img_out = cv2.imdecode(arr_out, cv2.IMREAD_UNCHANGED)
-    
+    img_out = cv2.imdecode(
+        arr_out,
+        cv2.IMREAD_UNCHANGED,
+    )
+
     if img_out is None:
         raise ValueError("Background removal failed")
-    
+
     if len(img_out.shape) == 3 and img_out.shape[2] == 3:
-        alpha = np.full((img_out.shape[0], img_out.shape[1], 1), 255, dtype=np.uint8)
-        img_out = np.concatenate([img_out, alpha], axis=2)
-    
+        alpha = np.full(
+            (img_out.shape[0], img_out.shape[1], 1),
+            255,
+            dtype=np.uint8,
+        )
+
+        img_out = np.concatenate(
+            [img_out, alpha],
+            axis=2,
+        )
+
     if len(img_out.shape) != 3 or img_out.shape[2] != 4:
-        raise ValueError("Background removal did not return RGBA")
-    
-    # ekstra transparent bund, så contour kan gå helt ned
+        raise ValueError(
+            "Background removal did not return RGBA"
+        )
+
+    # Ekstra transparent bund, så contour kan gå helt ned
     img_out = cv2.copyMakeBorder(
-        img_out, 0, 180, 0, 0,
+        img_out,
+        0,
+        180,
+        0,
+        0,
         cv2.BORDER_CONSTANT,
         value=(0, 0, 0, 0),
     )
-    
-    rgba = cv2.cvtColor(img_out, cv2.COLOR_BGRA2RGBA)
-    return resize_if_needed_rgba(rgba, max_dimension=max_dimension)
+
+    rgba = cv2.cvtColor(
+        img_out,
+        cv2.COLOR_BGRA2RGBA,
+    )
+
+    return resize_if_needed_rgba(
+        rgba,
+        max_dimension=max_dimension,
+    )
 
 
 def alpha_to_mask(
@@ -230,14 +274,37 @@ def alpha_to_mask(
     smooth: bool = True,
 ) -> np.ndarray:
     alpha = rgba[:, :, 3]
-    mask = np.where(alpha > alpha_threshold, 255, 0).astype(np.uint8)
+    mask = np.where(
+        alpha > alpha_threshold,
+        255,
+        0,
+    ).astype(np.uint8)
 
     if smooth:
-        mask = cv2.GaussianBlur(mask, (5, 5), 0)
-        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+        mask = cv2.GaussianBlur(
+            mask,
+            (5, 5),
+            0,
+        )
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        _, mask = cv2.threshold(
+            mask,
+            127,
+            255,
+            cv2.THRESH_BINARY,
+        )
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (5, 5),
+    )
+
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        kernel,
+        iterations=1,
+    )
 
     return mask
 
