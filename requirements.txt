@@ -9,3 +9,4 @@ rembg[cpu]
 onnxruntime
 pillow
 pymupdf
+pillow-heif
