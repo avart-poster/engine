@@ -128,14 +128,18 @@ def resize_if_needed_rgba(rgba: np.ndarray, max_dimension: int = MAX_DIMENSION) 
     return cv2.resize(rgba, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
 
-def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIMENSION) -> np.ndarray:
+def remove_background_if_needed(
+    upload: UploadFile,
+    max_dimension: int = MAX_DIMENSION,
+    return_original: bool = False,
+):
     data = upload.file.read()
 
     if not data:
         raise ValueError("Empty file")
 
     # --------------------------------------------------
-    # ÅBN BILLEDE
+    # ÅBN ORIGINALBILLEDE
     # JPEG / PNG / WEBP via OpenCV
     # HEIC / HEIF via Pillow + pillow-heif
     # --------------------------------------------------
@@ -143,14 +147,11 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
     arr = np.frombuffer(data, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
 
-    # Hvis OpenCV ikke kan læse filen,
-    # prøv Pillow. pillow-heif gør HEIC/HEIF tilgængelig her.
     if img is None:
         try:
             pil_image = Image.open(io.BytesIO(data))
             pil_image.load()
 
-            # Bevar transparency hvis billedet har alpha
             if "A" in pil_image.getbands():
                 pil_image = pil_image.convert("RGBA")
                 img = cv2.cvtColor(
@@ -169,15 +170,43 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
                 f"Could not decode image: {e}"
             )
 
-    # Hvis upload allerede har ægte transparency
+    # --------------------------------------------------
+    # GEM ORIGINALEN FØR REMBG
+    # --------------------------------------------------
+
+    if len(img.shape) == 3 and img.shape[2] == 4:
+        original_rgb = cv2.cvtColor(
+            img,
+            cv2.COLOR_BGRA2RGB,
+        )
+    else:
+        original_rgb = cv2.cvtColor(
+            img,
+            cv2.COLOR_BGR2RGB,
+        )
+
+    # --------------------------------------------------
+    # HVIS UPLOAD ALLEREDE HAR ÆGTE TRANSPARENCY
+    # --------------------------------------------------
+
     if len(img.shape) == 3 and img.shape[2] == 4:
         alpha = img[:, :, 3]
 
         if np.any(alpha < 250):
-            rgba = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+            rgba = cv2.cvtColor(
+                img,
+                cv2.COLOR_BGRA2RGBA,
+            )
+
             rgba = resize_if_needed_rgba(
                 rgba,
                 max_dimension=max_dimension,
+            )
+
+            original_rgb = cv2.resize(
+                original_rgb,
+                (rgba.shape[1], rgba.shape[0]),
+                interpolation=cv2.INTER_AREA,
             )
 
             rgba = cv2.copyMakeBorder(
@@ -190,12 +219,33 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
                 value=(0, 0, 0, 0),
             )
 
+            original_rgb = cv2.copyMakeBorder(
+                original_rgb,
+                0,
+                180,
+                0,
+                0,
+                cv2.BORDER_CONSTANT,
+                value=(255, 255, 255),
+            )
+
+            if return_original:
+                return rgba, original_rgb
+
             return rgba
 
-    # Resize før rembg for stabilitet
+    # --------------------------------------------------
+    # RESIZE FØR REMBG
+    # --------------------------------------------------
+
     max_input_size = 1600
+
     h, w = img.shape[:2]
-    scale = min(1.0, max_input_size / max(h, w))
+
+    scale = min(
+        1.0,
+        max_input_size / max(h, w),
+    )
 
     if scale < 1.0:
         new_w = int(w * scale)
@@ -207,31 +257,53 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
             interpolation=cv2.INTER_AREA,
         )
 
-    # Konverter altid til PNG før rembg
-    ok, buffer = cv2.imencode(".png", img)
+        original_rgb = cv2.resize(
+            original_rgb,
+            (new_w, new_h),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    # --------------------------------------------------
+    # REMBG
+    # --------------------------------------------------
+
+    ok, buffer = cv2.imencode(
+        ".png",
+        img,
+    )
 
     if not ok:
-        raise ValueError("Could not encode resized image")
-
-    data = buffer.tobytes()
+        raise ValueError(
+            "Could not encode resized image"
+        )
 
     output = remove(
-        data,
+        buffer.tobytes(),
         session=get_rembg_session(),
     )
 
-    arr_out = np.frombuffer(output, np.uint8)
+    arr_out = np.frombuffer(
+        output,
+        np.uint8,
+    )
+
     img_out = cv2.imdecode(
         arr_out,
         cv2.IMREAD_UNCHANGED,
     )
 
     if img_out is None:
-        raise ValueError("Background removal failed")
+        raise ValueError(
+            "Background removal failed"
+        )
 
     if len(img_out.shape) == 3 and img_out.shape[2] == 3:
         alpha = np.full(
-            (img_out.shape[0], img_out.shape[1], 1),
+            (
+                img_out.shape[0],
+                img_out.shape[1],
+                1,
+            ),
             255,
             dtype=np.uint8,
         )
@@ -246,9 +318,27 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
             "Background removal did not return RGBA"
         )
 
-    # Ekstra transparent bund, så contour kan gå helt ned
-    img_out = cv2.copyMakeBorder(
+    rgba = cv2.cvtColor(
         img_out,
+        cv2.COLOR_BGRA2RGBA,
+    )
+
+    # --------------------------------------------------
+    # SØRG FOR SAMME STØRRELSE
+    # --------------------------------------------------
+
+    original_rgb = cv2.resize(
+        original_rgb,
+        (rgba.shape[1], rgba.shape[0]),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    # --------------------------------------------------
+    # TRANSPARENT BUND
+    # --------------------------------------------------
+
+    rgba = cv2.copyMakeBorder(
+        rgba,
         0,
         180,
         0,
@@ -257,15 +347,35 @@ def remove_background_if_needed(upload: UploadFile, max_dimension: int = MAX_DIM
         value=(0, 0, 0, 0),
     )
 
-    rgba = cv2.cvtColor(
-        img_out,
-        cv2.COLOR_BGRA2RGBA,
+    original_rgb = cv2.copyMakeBorder(
+        original_rgb,
+        0,
+        180,
+        0,
+        0,
+        cv2.BORDER_CONSTANT,
+        value=(255, 255, 255),
     )
 
-    return resize_if_needed_rgba(
+    # --------------------------------------------------
+    # SLUT-RESIZE
+    # --------------------------------------------------
+
+    rgba = resize_if_needed_rgba(
         rgba,
         max_dimension=max_dimension,
     )
+
+    original_rgb = cv2.resize(
+        original_rgb,
+        (rgba.shape[1], rgba.shape[0]),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    if return_original:
+        return rgba, original_rgb
+
+    return rgba
 
 
 def alpha_to_mask(
@@ -286,20 +396,36 @@ def alpha_to_mask(
     return mask
 
 def refine_mask_with_image_edges(
-    rgba: np.ndarray,
+    original_rgb: np.ndarray,
     mask: np.ndarray,
     band_radius: int = 12,
 ) -> np.ndarray:
 
-    # Originalbilledet fra RGBA
-    rgb = rgba[:, :, :3]
-    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    # --------------------------------------------------
+    # FIND KANTER I DET ORIGINALE FOTO
+    # --------------------------------------------------
 
-    # Gråtoner + meget mild støjreduktion
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    # original_rgb er billedet FØR rembg.
+    # Det betyder, at de rigtige detaljer ved fx
+    # næse, læber og hage stadig findes her.
 
-    # Find stærke kanter i originalfotoet
+    bgr = cv2.cvtColor(
+        original_rgb,
+        cv2.COLOR_RGB2BGR,
+    )
+
+    gray = cv2.cvtColor(
+        bgr,
+        cv2.COLOR_BGR2GRAY,
+    )
+
+    # Meget mild støjreduktion.
+    gray = cv2.GaussianBlur(
+        gray,
+        (3, 3),
+        0,
+    )
+
     edges = cv2.Canny(
         gray,
         40,
@@ -307,7 +433,10 @@ def refine_mask_with_image_edges(
         L2gradient=True,
     )
 
-    # Find selve kanten af U2Net-masken
+    # --------------------------------------------------
+    # FIND U2NET-MASKENS EKSISTERENDE KANT
+    # --------------------------------------------------
+
     kernel3 = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (3, 3),
@@ -330,8 +459,10 @@ def refine_mask_with_image_edges(
         eroded,
     )
 
-    # Lav et smalt område omkring den eksisterende
-    # U2Net-kant. Vi leder KUN efter billedkanter her.
+    # --------------------------------------------------
+    # SØG KUN TÆT PÅ U2NET-KANTEN
+    # --------------------------------------------------
+
     band_size = (band_radius * 2) + 1
 
     band_kernel = cv2.getStructuringElement(
@@ -350,22 +481,10 @@ def refine_mask_with_image_edges(
         search_band,
     )
 
-    # Distance til nærmeste rigtig billedkant
-    inverted_edges = cv2.bitwise_not(
-        candidate_edges
-    )
+    # --------------------------------------------------
+    # FIND U2NET-KONTUREN
+    # --------------------------------------------------
 
-    distance, labels = cv2.distanceTransformWithLabels(
-        inverted_edges,
-        cv2.DIST_L2,
-        5,
-        labelType=cv2.DIST_LABEL_PIXEL,
-    )
-
-    # Vi starter med U2Net-masken.
-    refined = mask.copy()
-
-    # Konturen fra den eksisterende maske
     contours, _ = cv2.findContours(
         mask,
         cv2.RETR_EXTERNAL,
@@ -382,7 +501,10 @@ def refine_mask_with_image_edges(
 
     points = largest[:, 0, :]
 
-    # Kandidatkant-pixels
+    # --------------------------------------------------
+    # FIND KANDIDATKANTER FRA ORIGINALFOTOET
+    # --------------------------------------------------
+
     edge_y, edge_x = np.where(
         candidate_edges > 0
     )
@@ -395,6 +517,11 @@ def refine_mask_with_image_edges(
     ).astype(np.float32)
 
     refined_points = []
+
+    # --------------------------------------------------
+    # FLYT U2NET-KANTEN MOD NÆRMESTE RIGTIGE
+    # BILLEDKANT – MEN KUN INDEN FOR band_radius
+    # --------------------------------------------------
 
     for point in points:
 
@@ -433,7 +560,10 @@ def refine_mask_with_image_edges(
         dtype=np.int32,
     ).reshape(-1, 1, 2)
 
-    # Byg ny lukket maske fra den raffinerede kant
+    # --------------------------------------------------
+    # BYG NY MASKE
+    # --------------------------------------------------
+
     refined = np.zeros_like(mask)
 
     cv2.drawContours(
@@ -1639,7 +1769,11 @@ async def alpha_debug(
     upscale: int = Query(4, ge=1, le=8),
 ):
     try:
-        rgba = remove_background_if_needed(file1, max_dimension=max_dimension)
+        rgba, original_rgb = remove_background_if_needed(
+            file1,
+            max_dimension=max_dimension,
+            return_original=True,
+        )
 
         mask = alpha_to_mask(
             rgba,
@@ -1648,7 +1782,7 @@ async def alpha_debug(
         )
         
         mask = refine_mask_with_image_edges(
-            rgba,
+            original_rgb,
             mask,
             band_radius=12,
         )
