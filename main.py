@@ -285,6 +285,167 @@ def alpha_to_mask(
 
     return mask
 
+def refine_mask_with_image_edges(
+    rgba: np.ndarray,
+    mask: np.ndarray,
+    band_radius: int = 12,
+) -> np.ndarray:
+
+    # Originalbilledet fra RGBA
+    rgb = rgba[:, :, :3]
+    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+    # Gråtoner + meget mild støjreduktion
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    # Find stærke kanter i originalfotoet
+    edges = cv2.Canny(
+        gray,
+        40,
+        120,
+        L2gradient=True,
+    )
+
+    # Find selve kanten af U2Net-masken
+    kernel3 = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (3, 3),
+    )
+
+    dilated = cv2.dilate(
+        mask,
+        kernel3,
+        iterations=1,
+    )
+
+    eroded = cv2.erode(
+        mask,
+        kernel3,
+        iterations=1,
+    )
+
+    mask_edge = cv2.subtract(
+        dilated,
+        eroded,
+    )
+
+    # Lav et smalt område omkring den eksisterende
+    # U2Net-kant. Vi leder KUN efter billedkanter her.
+    band_size = (band_radius * 2) + 1
+
+    band_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (band_size, band_size),
+    )
+
+    search_band = cv2.dilate(
+        mask_edge,
+        band_kernel,
+        iterations=1,
+    )
+
+    candidate_edges = cv2.bitwise_and(
+        edges,
+        search_band,
+    )
+
+    # Distance til nærmeste rigtig billedkant
+    inverted_edges = cv2.bitwise_not(
+        candidate_edges
+    )
+
+    distance, labels = cv2.distanceTransformWithLabels(
+        inverted_edges,
+        cv2.DIST_L2,
+        5,
+        labelType=cv2.DIST_LABEL_PIXEL,
+    )
+
+    # Vi starter med U2Net-masken.
+    refined = mask.copy()
+
+    # Konturen fra den eksisterende maske
+    contours, _ = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_NONE,
+    )
+
+    if not contours:
+        return mask
+
+    largest = max(
+        contours,
+        key=cv2.contourArea,
+    )
+
+    points = largest[:, 0, :]
+
+    # Kandidatkant-pixels
+    edge_y, edge_x = np.where(
+        candidate_edges > 0
+    )
+
+    if len(edge_x) == 0:
+        return mask
+
+    edge_points = np.column_stack(
+        (edge_x, edge_y)
+    ).astype(np.float32)
+
+    refined_points = []
+
+    for point in points:
+
+        px = float(point[0])
+        py = float(point[1])
+
+        delta = edge_points - np.array(
+            [px, py],
+            dtype=np.float32,
+        )
+
+        dist2 = np.sum(
+            delta * delta,
+            axis=1,
+        )
+
+        nearest_index = np.argmin(
+            dist2
+        )
+
+        nearest_distance = np.sqrt(
+            dist2[nearest_index]
+        )
+
+        if nearest_distance <= band_radius:
+            refined_points.append(
+                edge_points[nearest_index]
+            )
+        else:
+            refined_points.append(
+                [px, py]
+            )
+
+    refined_points = np.array(
+        refined_points,
+        dtype=np.int32,
+    ).reshape(-1, 1, 2)
+
+    # Byg ny lukket maske fra den raffinerede kant
+    refined = np.zeros_like(mask)
+
+    cv2.drawContours(
+        refined,
+        [refined_points],
+        -1,
+        255,
+        thickness=cv2.FILLED,
+    )
+
+    return refined
+
 
 def smooth_contour_points(points: np.ndarray, smooth_window: int = 9) -> np.ndarray:
     n = len(points)
@@ -1482,8 +1643,18 @@ async def alpha_debug(
     try:
         rgba = remove_background_if_needed(file1, max_dimension=max_dimension)
 
-        mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
-
+        mask = alpha_to_mask(
+            rgba,
+            alpha_threshold=alpha_threshold,
+            smooth=smooth,
+        )
+        
+        mask = refine_mask_with_image_edges(
+            rgba,
+            mask,
+            band_radius=12,
+        )
+        
         contour = get_smoothed_outer_contour(
             mask,
             epsilon_ratio=epsilon_ratio,
