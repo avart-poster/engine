@@ -48,7 +48,7 @@ LOGO_BOTTOM_MM = 50
 DEFAULT_STROKE_WIDTH = 5
 
 MAX_DIMENSION = 1600
-REMBG_MODEL = "u2net_human_seg"
+REMBG_MODEL = "birefnet-general"
 
 
 # --------------------------------------------------
@@ -1781,12 +1781,7 @@ async def alpha_debug(
             smooth=smooth,
         )
         
-        mask = refine_mask_with_image_edges(
-            original_rgb,
-            mask,
-            band_radius=12,
-        )
-        
+          
         contour = get_smoothed_outer_contour(
             mask,
             epsilon_ratio=epsilon_ratio,
