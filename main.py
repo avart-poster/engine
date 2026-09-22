@@ -274,37 +274,14 @@ def alpha_to_mask(
     smooth: bool = True,
 ) -> np.ndarray:
     alpha = rgba[:, :, 3]
+
+    # Bevar rembg-maskens kant så præcist som muligt.
+    # Ingen blur eller morphology i denne fase.
     mask = np.where(
         alpha > alpha_threshold,
         255,
-        0,
+        0
     ).astype(np.uint8)
-
-    if smooth:
-        mask = cv2.GaussianBlur(
-            mask,
-            (5, 5),
-            0,
-        )
-
-        _, mask = cv2.threshold(
-            mask,
-            127,
-            255,
-            cv2.THRESH_BINARY,
-        )
-
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (5, 5),
-    )
-
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_CLOSE,
-        kernel,
-        iterations=1,
-    )
 
     return mask
 
