@@ -48,7 +48,7 @@ LOGO_BOTTOM_MM = 50
 DEFAULT_STROKE_WIDTH = 5
 
 MAX_DIMENSION = 1600
-REMBG_MODEL = "u2net_human_seg"
+REMBG_MODEL = "birefnet-general-lite"
 
 
 # --------------------------------------------------
