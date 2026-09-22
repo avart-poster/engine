@@ -1630,8 +1630,6 @@ async def alpha_preview(
 @app.post("/alpha/debug")
 async def alpha_debug(
     file1: UploadFile = File(...),
-    file2: UploadFile | None = File(None),
-    file3: UploadFile | None = File(None),
     max_dimension: int = Query(MAX_DIMENSION, ge=600, le=3000),
     alpha_threshold: int = Query(1, ge=0, le=255),
     smooth: bool = Query(True),
