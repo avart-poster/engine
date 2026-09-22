@@ -48,7 +48,7 @@ LOGO_BOTTOM_MM = 50
 DEFAULT_STROKE_WIDTH = 5
 
 MAX_DIMENSION = 1600
-REMBG_MODEL = "isnet-general-use"
+REMBG_MODEL = "silueta"
 
 
 # --------------------------------------------------
