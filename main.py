@@ -331,28 +331,23 @@ def smooth_contour_points(points: np.ndarray, smooth_window: int = 9) -> np.ndar
 def get_smoothed_outer_contour(
     mask: np.ndarray,
     epsilon_ratio: float = 0.00020,
-    smooth_window: int = 13,
+    smooth_window: int = 7,
 ) -> np.ndarray:
-    kernel = np.ones((11, 11), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-    mask_blur = cv2.GaussianBlur(mask, (13, 13), 0)
+    # Find personens yderkontur direkte i masken.
+    # Ingen blur, smoothing eller simplificering i denne test.
+    contours, _ = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_NONE
+    )
 
-    contours, _ = cv2.findContours(mask_blur, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         raise ValueError("No contour found")
 
     largest = max(contours, key=cv2.contourArea)
-    points = largest[:, 0, :].astype(np.float32)
 
-    smoothed = smooth_contour_points(points, smooth_window=smooth_window)
-    smoothed_contour = np.round(smoothed).astype(np.int32).reshape(-1, 1, 2)
-
-    peri = cv2.arcLength(smoothed_contour, True)
-    eps = max(0.5, peri * epsilon_ratio)
-
-    simplified = cv2.approxPolyDP(smoothed_contour, eps, True)
-    return simplified
+    return largest
 
 
 def crop_contour_to_subject(
