@@ -47,7 +47,7 @@ LOGO_BOTTOM_MM = 50
 
 DEFAULT_STROKE_WIDTH = 5
 
-MAX_DIMENSION = 1600
+MAX_DIMENSION = 1200
 REMBG_MODEL = "isnet-general-use"
 
 
@@ -380,7 +380,7 @@ def remove_background_if_needed(
 
 def alpha_to_mask(
     rgba: np.ndarray,
-    alpha_threshold: int = 1,
+    alpha_threshold: int = 128,
     smooth: bool = True,
 ) -> np.ndarray:
     alpha = rgba[:, :, 3]
