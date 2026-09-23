@@ -1720,7 +1720,7 @@ async def alpha_preview(
     file2: UploadFile | None = File(None),
     file3: UploadFile | None = File(None),
     max_dimension: int = Query(MAX_DIMENSION, ge=600, le=3000),
-    alpha_threshold: int = Query(1, ge=0, le=255),
+    alpha_threshold: int = Query(128, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.00020, ge=0.00005, le=0.02),
     smooth_window: int = Query(13, ge=3, le=51),
@@ -1761,7 +1761,7 @@ async def alpha_preview(
 async def alpha_debug(
     file1: UploadFile = File(...),
     max_dimension: int = Query(MAX_DIMENSION, ge=600, le=3000),
-    alpha_threshold: int = Query(1, ge=0, le=255),
+    alpha_threshold: int = Query(128, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.00020, ge=0.00005, le=0.02),
     smooth_window: int = Query(13, ge=3, le=51),
@@ -1806,7 +1806,7 @@ async def alpha_debug(
 async def alpha_svg(
     file: UploadFile = File(...),
     max_dimension: int = Query(MAX_DIMENSION, ge=600, le=3000),
-    alpha_threshold: int = Query(1, ge=0, le=255),
+    alpha_threshold: int = Query(128, ge=0, le=255),
     smooth: bool = Query(True),
     epsilon_ratio: float = Query(0.00020, ge=0.00005, le=0.02),
     smooth_window: int = Query(13, ge=3, le=51),
@@ -1968,7 +1968,7 @@ async def poster_process(
     ),
 
     alpha_threshold: int = Query(
-        1,
+        128,
         ge=0,
         le=255,
     ),
@@ -2272,7 +2272,7 @@ async def poster_pdf(
     ),
 
     alpha_threshold: int = Query(
-        1,
+        128,
         ge=0,
         le=255,
     ),
@@ -2361,7 +2361,7 @@ async def poster_preview(
     ),
 
     alpha_threshold: int = Query(
-        1,
+        128,
         ge=0,
         le=255,
     ),
