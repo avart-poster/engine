@@ -782,19 +782,91 @@ def render_debug_png(
 
     return png.tobytes()
 
+def get_significant_inner_contours(
+    mask: np.ndarray,
+    min_area_ratio: float = 0.002,
+) -> list[np.ndarray]:
+    """
+    Find betydningsfulde indvendige huller i personens maske.
+
+    Små huller/støj ignoreres.
+    Større negative rum, fx mellem hestehale og nakke,
+    bevares som indvendige konturer.
+    """
+
+    contours, hierarchy = cv2.findContours(
+        mask,
+        cv2.RETR_CCOMP,
+        cv2.CHAIN_APPROX_NONE,
+    )
+
+    if hierarchy is None or not contours:
+        return []
+
+    hierarchy = hierarchy[0]
+
+    outer_index = max(
+        range(len(contours)),
+        key=lambda i: cv2.contourArea(contours[i])
+        if hierarchy[i][3] == -1
+        else -1,
+    )
+
+    outer_area = cv2.contourArea(contours[outer_index])
+
+    if outer_area <= 0:
+        return []
+
+    inner_contours = []
+
+    for i, contour in enumerate(contours):
+        parent = hierarchy[i][3]
+
+        # Kun direkte huller inde i personens hovedkontur
+        if parent != outer_index:
+            continue
+
+        area = cv2.contourArea(contour)
+
+        # Ignorer små maskerester/støj
+        if area / outer_area < min_area_ratio:
+            continue
+
+        inner_contours.append(contour)
+
+    return inner_contours
 
 def contour_to_svg(
     contour: np.ndarray,
     width: int,
     height: int,
+    mask: np.ndarray | None = None,
     stroke_width: float = 3.5,
     crop_to_subject: bool = False,
     pad: int = 30,
 ) -> str:
     if crop_to_subject:
-        contour, width, height = crop_contour_to_subject(contour, width, height, pad=pad)
+        x, y, w, h = cv2.boundingRect(contour)
+    
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(width, x + w + pad)
+        y2 = min(height, y + h + pad)
+    
+        contour = contour.copy()
+        contour[:, 0, 0] -= x1
+        contour[:, 0, 1] -= y1
+    
+        if mask is not None:
+            mask = mask[y1:y2, x1:x2].copy()
+    
+        width = x2 - x1
+        height = y2 - y1
 
-    contour = anchor_contour_to_bottom(contour, height)
+    lowest_y = contour[:, 0, 1].max()
+    anchor_shift = (height - 1) - lowest_y
+    contour[:, 0, 1] = contour[:, 0, 1] + anchor_shift
+
     contour = open_contour_at_bottom(contour, height=height, bleed=0)
     pts = contour[:, 0, :]
 
@@ -807,7 +879,38 @@ def contour_to_svg(
 
     path = " ".join(d)
 
-    svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+    inner_paths = []
+
+    if mask is not None:
+        inner_contours = get_significant_inner_contours(mask)
+
+        for inner in inner_contours:
+            inner = inner.copy()
+            inner[:, 0, 1] = inner[:, 0, 1] + anchor_shift
+
+            inner_pts = inner[:, 0, :]
+
+            if len(inner_pts) < 2:
+                continue
+
+            inner_d = [
+                f"M {inner_pts[0][0]:.2f} {inner_pts[0][1]:.2f}"
+            ]
+
+            for p in inner_pts[1:]:
+                inner_d.append(
+                    f"L {p[0]:.2f} {p[1]:.2f}"
+                )
+
+                inner_paths.append(" ".join(inner_d))
+            
+                inner_svg = "\n".join(
+                    f'<path d="{p}" fill="none" stroke="black" stroke-width="{stroke_width}" stroke-linecap="round" stroke-linejoin="round"/>'
+                    for p in inner_paths
+                )
+            
+                svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+    
 <svg xmlns="http://www.w3.org/2000/svg"
 width="{width}"
 height="{height}"
@@ -819,6 +922,7 @@ viewBox="0 0 {width} {height}">
     stroke-width="{stroke_width}"
     stroke-linecap="round"
     stroke-linejoin="round"/>
+{inner_svg}
 </svg>
 '''
     return svg
@@ -1830,6 +1934,7 @@ async def alpha_svg(
             contour=contour,
             width=w,
             height=h,
+            mask=mask,
             stroke_width=stroke_width,
             crop_to_subject=crop_to_subject,
             pad=pad,
@@ -1890,6 +1995,7 @@ def build_poster_pdf(
             contour=contour,
             width=w,
             height=h,
+            mask=mask,
             stroke_width=stroke_width,
             crop_to_subject=crop_to_subject,
             pad=pad,
@@ -2040,6 +2146,7 @@ async def poster_process(
                 contour=contour,
                 width=w,
                 height=h,
+                mask=mask,
                 stroke_width=stroke_width,
                 crop_to_subject=crop_to_subject,
                 pad=pad,
