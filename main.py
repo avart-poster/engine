@@ -395,206 +395,6 @@ def alpha_to_mask(
 
     return mask
 
-def refine_mask_with_image_edges(
-    original_rgb: np.ndarray,
-    mask: np.ndarray,
-    band_radius: int = 12,
-) -> np.ndarray:
-
-    # --------------------------------------------------
-    # FIND KANTER I DET ORIGINALE FOTO
-    # --------------------------------------------------
-
-    # original_rgb er billedet FØR rembg.
-    # Det betyder, at de rigtige detaljer ved fx
-    # næse, læber og hage stadig findes her.
-
-    bgr = cv2.cvtColor(
-        original_rgb,
-        cv2.COLOR_RGB2BGR,
-    )
-
-    gray = cv2.cvtColor(
-        bgr,
-        cv2.COLOR_BGR2GRAY,
-    )
-
-    # Meget mild støjreduktion.
-    gray = cv2.GaussianBlur(
-        gray,
-        (3, 3),
-        0,
-    )
-
-    edges = cv2.Canny(
-        gray,
-        40,
-        120,
-        L2gradient=True,
-    )
-
-    # --------------------------------------------------
-    # FIND U2NET-MASKENS EKSISTERENDE KANT
-    # --------------------------------------------------
-
-    kernel3 = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (3, 3),
-    )
-
-    dilated = cv2.dilate(
-        mask,
-        kernel3,
-        iterations=1,
-    )
-
-    eroded = cv2.erode(
-        mask,
-        kernel3,
-        iterations=1,
-    )
-
-    mask_edge = cv2.subtract(
-        dilated,
-        eroded,
-    )
-
-    # --------------------------------------------------
-    # SØG KUN TÆT PÅ U2NET-KANTEN
-    # --------------------------------------------------
-
-    band_size = (band_radius * 2) + 1
-
-    band_kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (band_size, band_size),
-    )
-
-    search_band = cv2.dilate(
-        mask_edge,
-        band_kernel,
-        iterations=1,
-    )
-
-    candidate_edges = cv2.bitwise_and(
-        edges,
-        search_band,
-    )
-
-    # --------------------------------------------------
-    # FIND U2NET-KONTUREN
-    # --------------------------------------------------
-
-    contours, _ = cv2.findContours(
-        mask,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_NONE,
-    )
-
-    if not contours:
-        return mask
-
-    largest = max(
-        contours,
-        key=cv2.contourArea,
-    )
-
-    points = largest[:, 0, :]
-
-    # --------------------------------------------------
-    # FIND KANDIDATKANTER FRA ORIGINALFOTOET
-    # --------------------------------------------------
-
-    edge_y, edge_x = np.where(
-        candidate_edges > 0
-    )
-
-    if len(edge_x) == 0:
-        return mask
-
-    edge_points = np.column_stack(
-        (edge_x, edge_y)
-    ).astype(np.float32)
-
-    refined_points = []
-
-    # --------------------------------------------------
-    # FLYT U2NET-KANTEN MOD NÆRMESTE RIGTIGE
-    # BILLEDKANT – MEN KUN INDEN FOR band_radius
-    # --------------------------------------------------
-
-    for point in points:
-
-        px = float(point[0])
-        py = float(point[1])
-
-        delta = edge_points - np.array(
-            [px, py],
-            dtype=np.float32,
-        )
-
-        dist2 = np.sum(
-            delta * delta,
-            axis=1,
-        )
-
-        nearest_index = np.argmin(
-            dist2
-        )
-
-        nearest_distance = np.sqrt(
-            dist2[nearest_index]
-        )
-
-        if nearest_distance <= band_radius:
-            refined_points.append(
-                edge_points[nearest_index]
-            )
-        else:
-            refined_points.append(
-                [px, py]
-            )
-
-    refined_points = np.array(
-        refined_points,
-        dtype=np.int32,
-    ).reshape(-1, 1, 2)
-
-    # --------------------------------------------------
-    # BYG NY MASKE
-    # --------------------------------------------------
-
-    refined = np.zeros_like(mask)
-
-    cv2.drawContours(
-        refined,
-        [refined_points],
-        -1,
-        255,
-        thickness=cv2.FILLED,
-    )
-
-    return refined
-
-
-def smooth_contour_points(points: np.ndarray, smooth_window: int = 9) -> np.ndarray:
-    n = len(points)
-    if n < smooth_window or n < 10:
-        return points.copy()
-
-    if smooth_window % 2 == 0:
-        smooth_window += 1
-
-    pad = smooth_window // 2
-    pts_pad = np.vstack([points[-pad:], points, points[:pad]])
-
-    smoothed = []
-    for i in range(n):
-        segment = pts_pad[i:i + smooth_window]
-        smoothed.append(segment.mean(axis=0))
-
-    return np.array(smoothed, dtype=np.float32)
-
 
 def get_smoothed_outer_contour(
     mask: np.ndarray,
@@ -845,48 +645,105 @@ def contour_to_svg(
     crop_to_subject: bool = False,
     pad: int = 30,
 ) -> str:
+
+    # --------------------------------------------------
+    # BESKÆR TIL PERSONEN
+    # --------------------------------------------------
+
     if crop_to_subject:
         x, y, w, h = cv2.boundingRect(contour)
-    
+
         x1 = max(0, x - pad)
         y1 = max(0, y - pad)
         x2 = min(width, x + w + pad)
         y2 = min(height, y + h + pad)
-    
+
         contour = contour.copy()
+
         contour[:, 0, 0] -= x1
         contour[:, 0, 1] -= y1
-    
+
         if mask is not None:
-            mask = mask[y1:y2, x1:x2].copy()
-    
+            mask = mask[
+                y1:y2,
+                x1:x2
+            ].copy()
+
         width = x2 - x1
         height = y2 - y1
 
-    lowest_y = contour[:, 0, 1].max()
-    anchor_shift = (height - 1) - lowest_y
-    contour[:, 0, 1] = contour[:, 0, 1] + anchor_shift
+    else:
+        contour = contour.copy()
 
-    contour = open_contour_at_bottom(contour, height=height, bleed=0)
+    # --------------------------------------------------
+    # FORANKR PERSONEN I BUNDEN
+    # --------------------------------------------------
+
+    lowest_y = contour[:, 0, 1].max()
+
+    anchor_shift = (
+        (height - 1) - lowest_y
+    )
+
+    contour[:, 0, 1] = (
+        contour[:, 0, 1]
+        + anchor_shift
+    )
+
+    # --------------------------------------------------
+    # ÅBN YDERKONTOUREN I BUNDEN
+    # --------------------------------------------------
+
+    contour = open_contour_at_bottom(
+        contour,
+        height=height,
+        bleed=0,
+    )
+
     pts = contour[:, 0, :]
 
     if len(pts) < 2:
-        raise ValueError("Contour too small")
+        raise ValueError(
+            "Contour too small"
+        )
 
-    d = [f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"]
+    # --------------------------------------------------
+    # BYG YDERKONTOURENS SVG-PATH
+    # --------------------------------------------------
+
+    d = [
+        f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"
+    ]
+
     for p in pts[1:]:
-        d.append(f"L {p[0]:.2f} {p[1]:.2f}")
+        d.append(
+            f"L {p[0]:.2f} {p[1]:.2f}"
+        )
 
     path = " ".join(d)
+
+    # --------------------------------------------------
+    # FIND INDVENDIGE HULLER
+    # fx mellem hestehale og nakke
+    # --------------------------------------------------
 
     inner_paths = []
 
     if mask is not None:
-        inner_contours = get_significant_inner_contours(mask)
+
+        inner_contours = (
+            get_significant_inner_contours(mask)
+        )
 
         for inner in inner_contours:
+
             inner = inner.copy()
-            inner[:, 0, 1] = inner[:, 0, 1] + anchor_shift
+
+            # Samme lodrette flytning som yderkonturen
+            inner[:, 0, 1] = (
+                inner[:, 0, 1]
+                + anchor_shift
+            )
 
             inner_pts = inner[:, 0, :]
 
@@ -894,7 +751,8 @@ def contour_to_svg(
                 continue
 
             inner_d = [
-                f"M {inner_pts[0][0]:.2f} {inner_pts[0][1]:.2f}"
+                f"M {inner_pts[0][0]:.2f} "
+                f"{inner_pts[0][1]:.2f}"
             ]
 
             for p in inner_pts[1:]:
@@ -902,19 +760,41 @@ def contour_to_svg(
                     f"L {p[0]:.2f} {p[1]:.2f}"
                 )
 
-                inner_paths.append(" ".join(inner_d))
-            
-                inner_svg = "\n".join(
-                    f'<path d="{p}" fill="none" stroke="black" stroke-width="{stroke_width}" stroke-linecap="round" stroke-linejoin="round"/>'
-                    for p in inner_paths
-                )
-            
-                svg = f'''<?xml version="1.0" encoding="UTF-8"?>
-    
+            # Luk den indvendige kontur
+            inner_d.append("Z")
+
+            inner_paths.append(
+                " ".join(inner_d)
+            )
+
+    # --------------------------------------------------
+    # LAV SVG FOR INDVENDIGE KONTURER
+    # --------------------------------------------------
+
+    inner_svg = "\n".join(
+        (
+            f'<path '
+            f'd="{inner_path}" '
+            f'fill="none" '
+            f'stroke="black" '
+            f'stroke-width="{stroke_width}" '
+            f'stroke-linecap="round" '
+            f'stroke-linejoin="round"/>'
+        )
+        for inner_path in inner_paths
+    )
+
+    # --------------------------------------------------
+    # BYG DEN ENDELIGE SVG
+    # --------------------------------------------------
+
+    svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+
 <svg xmlns="http://www.w3.org/2000/svg"
 width="{width}"
 height="{height}"
 viewBox="0 0 {width} {height}">
+
   <path
     d="{path}"
     fill="none"
@@ -922,9 +802,12 @@ viewBox="0 0 {width} {height}">
     stroke-width="{stroke_width}"
     stroke-linecap="round"
     stroke-linejoin="round"/>
+
 {inner_svg}
+
 </svg>
 '''
+
     return svg
 
 
