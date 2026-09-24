@@ -490,6 +490,55 @@ def get_smoothed_outer_contour(
 
     return contour
 
+def get_secondary_outer_contours(
+    mask: np.ndarray,
+    main_contour: np.ndarray,
+    min_area_ratio: float = 0.00015,
+    max_area_ratio: float = 0.05,
+) -> list[np.ndarray]:
+
+    contours, _ = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_NONE,
+    )
+
+    if not contours:
+        return []
+
+    main_area = cv2.contourArea(main_contour)
+
+    if main_area <= 0:
+        return []
+
+    secondary = []
+
+    for contour in contours:
+
+        # Spring selve hovedkonturen over
+        if np.array_equal(contour, main_contour):
+            continue
+
+        area = cv2.contourArea(contour)
+
+        if area <= 0:
+            continue
+
+        ratio = area / main_area
+
+        # Fjern mikroskopisk støj
+        if ratio < min_area_ratio:
+            continue
+
+        # En sekundær kontur må heller ikke være
+        # en stor separat genstand
+        if ratio > max_area_ratio:
+            continue
+
+        secondary.append(contour)
+
+    return secondary
+
 
 def crop_contour_to_subject(
     contour: np.ndarray,
@@ -720,51 +769,65 @@ def contour_to_svg(
 ) -> str:
 
     # --------------------------------------------------
-    # BESKÆR TIL PERSONEN
+    # GEM ORIGINAL KOORDINAT-FORSKYDNING
+    # --------------------------------------------------
+
+    crop_x1 = 0
+    crop_y1 = 0
+
+    # --------------------------------------------------
+    # CROP TIL PERSON
     # --------------------------------------------------
 
     if crop_to_subject:
+
         x, y, w, h = cv2.boundingRect(contour)
 
-        x1 = max(0, x - pad)
-        y1 = max(0, y - pad)
-        x2 = min(width, x + w + pad)
-        y2 = min(height, y + h + pad)
+        crop_x1 = max(0, x - pad)
+        crop_y1 = max(0, y - pad)
+
+        x2 = min(
+            width,
+            x + w + pad,
+        )
+
+        y2 = min(
+            height,
+            y + h + pad,
+        )
 
         contour = contour.copy()
 
-        contour[:, 0, 0] -= x1
-        contour[:, 0, 1] -= y1
+        contour[:, 0, 0] -= crop_x1
+        contour[:, 0, 1] -= crop_y1
 
         if mask is not None:
             mask = mask[
-                y1:y2,
-                x1:x2
+                crop_y1:y2,
+                crop_x1:x2
             ].copy()
 
-        width = x2 - x1
-        height = y2 - y1
+        width = x2 - crop_x1
+        height = y2 - crop_y1
 
     else:
         contour = contour.copy()
 
     # --------------------------------------------------
-    # FORANKR PERSONEN I BUNDEN
+    # FORANKR HOVEDKONTUREN I BUNDEN
     # --------------------------------------------------
 
     lowest_y = contour[:, 0, 1].max()
 
     anchor_shift = (
-        (height - 1) - lowest_y
+        (height - 1)
+        - lowest_y
     )
 
-    contour[:, 0, 1] = (
-        contour[:, 0, 1]
-        + anchor_shift
-    )
+    contour[:, 0, 1] += anchor_shift
 
     # --------------------------------------------------
-    # ÅBN YDERKONTOUREN I BUNDEN
+    # ÅBN HOVEDKONTUREN I BUNDEN
     # --------------------------------------------------
 
     contour = open_contour_at_bottom(
@@ -781,7 +844,7 @@ def contour_to_svg(
         )
 
     # --------------------------------------------------
-    # BYG YDERKONTOURENS SVG-PATH
+    # HOVEDKONTUR → SVG PATH
     # --------------------------------------------------
 
     d = [
@@ -789,34 +852,37 @@ def contour_to_svg(
     ]
 
     for p in pts[1:]:
+
         d.append(
             f"L {p[0]:.2f} {p[1]:.2f}"
         )
 
-    path = " ".join(d)
+    main_path = " ".join(d)
 
     # --------------------------------------------------
-    # FIND INDVENDIGE HULLER
-    # fx mellem hestehale og nakke
+    # EKSTRA SVG PATHS
     # --------------------------------------------------
 
-    inner_paths = []
+    extra_paths = []
 
     if mask is not None:
 
+        # ----------------------------------------------
+        # INDVENDIGE NEGATIVE RUM
+        # fx mellem hestehale og nakke
+        # ----------------------------------------------
+
         inner_contours = (
-            get_significant_inner_contours(mask)
+            get_significant_inner_contours(
+                mask
+            )
         )
 
         for inner in inner_contours:
 
             inner = inner.copy()
 
-            # Samme lodrette flytning som yderkonturen
-            inner[:, 0, 1] = (
-                inner[:, 0, 1]
-                + anchor_shift
-            )
+            inner[:, 0, 1] += anchor_shift
 
             inner_pts = inner[:, 0, :]
 
@@ -824,41 +890,112 @@ def contour_to_svg(
                 continue
 
             inner_d = [
-                f"M {inner_pts[0][0]:.2f} "
-                f"{inner_pts[0][1]:.2f}"
+                (
+                    f"M "
+                    f"{inner_pts[0][0]:.2f} "
+                    f"{inner_pts[0][1]:.2f}"
+                )
             ]
 
             for p in inner_pts[1:]:
+
                 inner_d.append(
                     f"L {p[0]:.2f} {p[1]:.2f}"
                 )
 
-            # Luk den indvendige kontur
+            # Luk hullet
             inner_d.append("Z")
 
-            inner_paths.append(
+            extra_paths.append(
                 " ".join(inner_d)
             )
 
+        # ----------------------------------------------
+        # SEKUNDÆRE YDRE KONTURER
+        # fx løse krøller / hår
+        # ----------------------------------------------
+
+        main_contours, _ = cv2.findContours(
+            mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_NONE,
+        )
+
+        if main_contours:
+
+            mask_main_contour = max(
+                main_contours,
+                key=cv2.contourArea,
+            )
+
+            secondary_contours = (
+                get_secondary_outer_contours(
+                    mask,
+                    mask_main_contour,
+                )
+            )
+
+            for secondary in secondary_contours:
+
+                secondary = secondary.copy()
+
+                secondary[:, 0, 1] += (
+                    anchor_shift
+                )
+
+                secondary_pts = (
+                    secondary[:, 0, :]
+                )
+
+                if len(secondary_pts) < 2:
+                    continue
+
+                secondary_d = [
+                    (
+                        f"M "
+                        f"{secondary_pts[0][0]:.2f} "
+                        f"{secondary_pts[0][1]:.2f}"
+                    )
+                ]
+
+                for p in secondary_pts[1:]:
+
+                    secondary_d.append(
+                        (
+                            f"L "
+                            f"{p[0]:.2f} "
+                            f"{p[1]:.2f}"
+                        )
+                    )
+
+                # Sekundære masker er lukkede øer
+                secondary_d.append("Z")
+
+                extra_paths.append(
+                    " ".join(
+                        secondary_d
+                    )
+                )
+
     # --------------------------------------------------
-    # LAV SVG FOR INDVENDIGE KONTURER
+    # BYG SVG FOR EKSTRA PATHS
     # --------------------------------------------------
 
-    inner_svg = "\n".join(
+    extra_svg = "\n".join(
         (
             f'<path '
-            f'd="{inner_path}" '
+            f'd="{path}" '
             f'fill="none" '
             f'stroke="black" '
             f'stroke-width="{stroke_width}" '
             f'stroke-linecap="round" '
             f'stroke-linejoin="round"/>'
         )
-        for inner_path in inner_paths
+        for path in extra_paths
     )
 
     # --------------------------------------------------
-    # BYG DEN ENDELIGE SVG
+    # FÆRDIG SVG
     # --------------------------------------------------
 
     svg = f'''<?xml version="1.0" encoding="UTF-8"?>
@@ -869,14 +1006,14 @@ height="{height}"
 viewBox="0 0 {width} {height}">
 
   <path
-    d="{path}"
+    d="{main_path}"
     fill="none"
     stroke="black"
     stroke-width="{stroke_width}"
     stroke-linecap="round"
     stroke-linejoin="round"/>
 
-{inner_svg}
+{extra_svg}
 
 </svg>
 '''
