@@ -1802,7 +1802,7 @@ async def alpha_svg(
     pad: int = Query(30, ge=0, le=300),
 ):
     try:
-        rgba = remove_background_if_needed(file1, max_dimension=max_dimension)
+        rgba = remove_background_if_needed(file, max_dimension=max_dimension)
         h, w = rgba.shape[:2]
 
         mask = alpha_to_mask(rgba, alpha_threshold=alpha_threshold, smooth=smooth)
