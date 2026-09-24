@@ -2221,8 +2221,8 @@ async def poster_process(
                 height=h,
                 mask=mask,
                 stroke_width=stroke_width,
-                crop_to_subject=crop_to_subject,
-                pad=pad,
+                crop_to_subject=True,
+                pad=30,
             )
 
             persons.append(
