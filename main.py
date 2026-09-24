@@ -402,20 +402,93 @@ def get_smoothed_outer_contour(
     smooth_window: int = 7,
 ) -> np.ndarray:
 
-    # Find personens yderkontur direkte i masken.
-    # Ingen blur, smoothing eller simplificering i denne test.
+    # --------------------------------------------------
+    # FIND PERSONENS YDERKONTUR
+    # --------------------------------------------------
+
     contours, _ = cv2.findContours(
         mask,
         cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_NONE
+        cv2.CHAIN_APPROX_NONE,
     )
 
     if not contours:
         raise ValueError("No contour found")
 
-    largest = max(contours, key=cv2.contourArea)
+    largest = max(
+        contours,
+        key=cv2.contourArea,
+    )
 
-    return largest
+    # --------------------------------------------------
+    # BEVAR ALLE KONTURPUNKTER
+    # --------------------------------------------------
+    # Vi simplificerer IKKE konturen med approxPolyDP.
+    # Det er vigtigt for at bevare detaljer i fx
+    # næse, mund, læber, hage og hår.
+    # --------------------------------------------------
+
+    points = largest[:, 0, :].astype(np.float32)
+
+    # --------------------------------------------------
+    # MEGET MILD SMOOTHING
+    # --------------------------------------------------
+    # smooth_window styrer hvor meget små pixelhak
+    # udjævnes.
+    #
+    # 3 = næsten original
+    # 5 = meget mild
+    # 7 = mild
+    # 9+ = mere udglatning
+    #
+    # Vi starter forsigtigt for at bevare ansigtet.
+    # --------------------------------------------------
+
+    if smooth_window < 3:
+        smooth_window = 3
+
+    if smooth_window % 2 == 0:
+        smooth_window += 1
+
+    n = len(points)
+
+    if n >= smooth_window:
+        pad = smooth_window // 2
+
+        padded = np.vstack([
+            points[-pad:],
+            points,
+            points[:pad],
+        ])
+
+        smoothed = np.empty_like(points)
+
+        for i in range(n):
+            segment = padded[
+                i:i + smooth_window
+            ]
+
+            smoothed[i] = segment.mean(
+                axis=0
+            )
+
+        points = smoothed
+
+    # --------------------------------------------------
+    # TILBAGE TIL OPENCV-KONTURFORMAT
+    # --------------------------------------------------
+
+    contour = np.round(
+        points
+    ).astype(np.int32)
+
+    contour = contour.reshape(
+        -1,
+        1,
+        2,
+    )
+
+    return contour
 
 
 def crop_contour_to_subject(
