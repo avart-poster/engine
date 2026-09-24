@@ -2164,44 +2164,20 @@ async def poster_process(
         File(description="Upload 1 to 6 billeder")
     ],
 
-    max_dimension: int = Query(
-        1200,
-        ge=600,
-        le=2000,
-    ),
+    max_dimension: int = Query(MAX_DIMENSION, ge=600, le=3000),
 
-    alpha_threshold: int = Query(
-        128,
-        ge=0,
-        le=255,
-    ),
-
+    alpha_threshold: int = Query(ALPHA_THRESHOLD, ge=0, le=255),
+    
     smooth: bool = Query(True),
-
-    epsilon_ratio: float = Query(
-        0.00020,
-        ge=0.00005,
-        le=0.02,
-    ),
-
-    smooth_window: int = Query(
-        13,
-        ge=3,
-        le=51,
-    ),
-
+    
+    epsilon_ratio: float = Query(EPSILON_RATIO, ge=0.00005, le=0.02),
+    
+    smooth_window: int = Query(SMOOTH_WINDOW, ge=3, le=51),
+    
     stroke_width: float = Query(
         3.5,
         ge=0.5,
         le=12.0,
-    ),
-
-    crop_to_subject: bool = Query(True),
-
-    pad: int = Query(
-        30,
-        ge=0,
-        le=300,
     ),
 
 ):
