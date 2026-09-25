@@ -9,6 +9,7 @@ from pillow_heif import register_heif_opener
 
 import cv2
 import numpy as np
+import onnxruntime as ort
 
 from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,13 +95,31 @@ except Exception as e:
 # rembg session
 # --------------------------------------------------
 
-_rembg_session = None
 
+_rembg_session = None
 
 def get_rembg_session():
     global _rembg_session
+
     if _rembg_session is None:
-        _rembg_session = new_session(REMBG_MODEL)
+        sess_opts = ort.SessionOptions()
+
+        # Reducer ONNX Runtime's RAM-forbrug
+        sess_opts.enable_cpu_mem_arena = False
+        sess_opts.enable_mem_pattern = False
+
+        # Vi behandler billeder sekventielt
+        sess_opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+        # Begræns CPU-tråde og deres ekstra hukommelse
+        sess_opts.intra_op_num_threads = 1
+        sess_opts.inter_op_num_threads = 1
+
+        _rembg_session = new_session(
+            REMBG_MODEL,
+            sess_opts=sess_opts,
+        )
+
     return _rembg_session
 
 
