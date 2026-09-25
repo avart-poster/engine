@@ -1732,27 +1732,50 @@ def generate_multi_poster_pdf(
                 # ----------------------------------------
                 # 4–6 PERSONER
                 # ----------------------------------------
-
+    
                 else:
-
-                    usable_width = (
-                        width - (2 * side_margin)
-                    )
-
-                    step = (
-                        usable_width / (count - 1)
-                    )
-
-                    target_center_x = (
-                        side_margin
-                        + (step * index)
-                    )
-
-                    x = (
-                        target_center_x
-                        - (draw_w / 2)
-                        - min_x
-                    )
+    
+                    # Første person:
+                    # venstre yderkant = designmargin
+                    if index == 0:
+    
+                        x = (
+                            side_margin
+                            - min_x
+                        )
+    
+                    # Sidste person:
+                    # højre yderkant = designmargin
+                    elif index == count - 1:
+    
+                        x = (
+                            width
+                            - side_margin
+                            - max_x
+                        )
+    
+                    # Personerne imellem fordeles jævnt
+                    # mellem designmarginerne
+                    else:
+    
+                        usable_width = (
+                            width - (2 * side_margin)
+                        )
+    
+                        step = (
+                            usable_width / (count - 1)
+                        )
+    
+                        target_center_x = (
+                            side_margin
+                            + (step * index)
+                        )
+    
+                        x = (
+                            target_center_x
+                            - (draw_w / 2)
+                            - min_x
+                        )
 
             else:
 
