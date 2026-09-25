@@ -2080,6 +2080,9 @@ def build_poster_pdf(
             smooth=smooth,
         )
 
+        # rgba skal ikke bruges mere
+        del rgba
+
         contour = get_smoothed_outer_contour(
             mask,
             epsilon_ratio=epsilon_ratio,
@@ -2094,9 +2097,16 @@ def build_poster_pdf(
             height=h,
             mask=mask,
             stroke_width=stroke_width,
-            crop_to_subject=crop_to_subject,
-            pad=pad,
+            crop_to_subject=True,
+            pad=30,
         )
+
+        # De store arrays skal ikke med videre til næste billede
+        del mask
+        del contour
+
+        import gc
+        gc.collect()
 
         return {
             "svg": svg,
