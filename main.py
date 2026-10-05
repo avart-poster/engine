@@ -287,12 +287,39 @@ def remove_background_if_needed(
         )
 
     # --------------------------------------------------
+    # FORBEHANDLING TIL REMBG
+    # --------------------------------------------------
+    # Avart skal kun bruge personens silhuet.
+    # Derfor konverteres billedet til gråtoner før
+    # baggrunds-segmenteringen.
+    #
+    # original_rgb ændres IKKE.
+    
+    if len(img.shape) == 3 and img.shape[2] == 4:
+        gray = cv2.cvtColor(
+            img,
+            cv2.COLOR_BGRA2GRAY,
+        )
+    else:
+        gray = cv2.cvtColor(
+            img,
+            cv2.COLOR_BGR2GRAY,
+        )
+    
+    # rembg forventer et almindeligt billede.
+    # Derfor laver vi gråtonen tilbage til 3 kanaler.
+    rembg_img = cv2.cvtColor(
+        gray,
+        cv2.COLOR_GRAY2BGR,
+    )
+    
+    # --------------------------------------------------
     # REMBG
     # --------------------------------------------------
-
+    
     ok, buffer = cv2.imencode(
         ".png",
-        img,
+        rembg_img,
     )
 
     if not ok:
