@@ -289,11 +289,9 @@ def remove_background_if_needed(
     # --------------------------------------------------
     # FORBEHANDLING TIL REMBG
     # --------------------------------------------------
-    # Avart skal kun bruge personens silhuet.
-    # Derfor konverteres billedet til gråtoner før
-    # baggrunds-segmenteringen.
-    #
-    # original_rgb ændres IKKE.
+    # Sort/hvid + lokal kontrastforbedring.
+    # Bruges KUN som input til segmenteringsmodellen.
+    # Originalbilledet ændres ikke.
     
     if len(img.shape) == 3 and img.shape[2] == 4:
         gray = cv2.cvtColor(
@@ -306,8 +304,22 @@ def remove_background_if_needed(
             cv2.COLOR_BGR2GRAY,
         )
     
-    # rembg forventer et almindeligt billede.
-    # Derfor laver vi gråtonen tilbage til 3 kanaler.
+    # Forbedr lokal kontrast uden at smadre højlys/skygger.
+    clahe = cv2.createCLAHE(
+        clipLimit=2.0,
+        tileGridSize=(8, 8),
+    )
+    
+    gray = clahe.apply(gray)
+    
+    # Mild global kontrastforøgelse
+    gray = cv2.convertScaleAbs(
+        gray,
+        alpha=1.20,
+        beta=0,
+    )
+    
+    # Tilbage til 3 kanaler til rembg
     rembg_img = cv2.cvtColor(
         gray,
         cv2.COLOR_GRAY2BGR,
