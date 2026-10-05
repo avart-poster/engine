@@ -1665,18 +1665,18 @@ def generate_multi_poster_pdf(
     # FORMAT
     # ------------------------------------------------
 
-    if PAGE_W_MM >= 590:       # A1
+    if max(page_w_mm, page_h_mm) >= 841:      # A1
         title_font_size = 55
         logo_width_mm = 60
-
-    elif PAGE_W_MM >= 500:     # 500 × 700
+    
+    elif max(page_w_mm, page_h_mm) >= 700:   # 500 × 700
         title_font_size = 45
         logo_width_mm = 50
-
-    elif PAGE_W_MM >= 420:     # A2
+    
+    elif max(page_w_mm, page_h_mm) >= 594:   # A2
         title_font_size = 35
         logo_width_mm = 40
-
+    
     else:                      # A3
         title_font_size = 25
         logo_width_mm = 30
@@ -2377,6 +2377,7 @@ def build_poster_pdf(
     stroke_width,
     crop_to_subject,
     pad,
+    size="50x70",
 ):
 
     def process_person(file):
@@ -2470,7 +2471,8 @@ def build_poster_pdf(
     name=name,
     stroke_width=DEFAULT_STROKE_WIDTH,
     orientation=orientation,
-    style=style,
+    style="light",
+    size=size,
     )
 
     return pdf_bytes
@@ -2690,6 +2692,7 @@ async def poster_render(
             stroke_width=DEFAULT_STROKE_WIDTH,
             orientation=orientation,
             style=style,
+            size=size,
         )
 
         # ---------------------------------------------
@@ -2808,6 +2811,11 @@ async def poster_pdf(
         ge=0,
         le=300,
     ),
+    
+    size: str = Query("50x70"),
+    
+    ):
+    
 
 ):
     try:
@@ -2823,6 +2831,7 @@ async def poster_pdf(
             stroke_width=stroke_width,
             crop_to_subject=crop_to_subject,
             pad=pad,
+            size=size,
         )
 
         return StreamingResponse(
@@ -2897,6 +2906,10 @@ async def poster_preview(
         ge=0,
         le=300,
     ),
+    
+    size: str = Query("50x70"),
+    
+    ):
 
 ):
     try:
@@ -2913,6 +2926,7 @@ async def poster_preview(
             stroke_width=stroke_width,
             crop_to_subject=crop_to_subject,
             pad=pad,
+            size=size,
         )
 
         # ------------------------------------------------
@@ -2928,10 +2942,32 @@ async def poster_preview(
 
         pixmap = page.get_pixmap(
             dpi=150,
-            alpha=False,
+            alpha=True,
         )
-
-        png_bytes = pixmap.tobytes("png")
+        
+        preview_rgba = Image.open(
+            io.BytesIO(pixmap.tobytes("png"))
+        ).convert("RGBA")
+        
+        preview_background = Image.new(
+            "RGBA",
+            preview_rgba.size,
+            "#F9F8F4",
+        )
+        
+        preview_image = Image.alpha_composite(
+            preview_background,
+            preview_rgba,
+        ).convert("RGB")
+        
+        preview_buffer = io.BytesIO()
+        
+        preview_image.save(
+            preview_buffer,
+            format="PNG",
+        )
+        
+        png_bytes = preview_buffer.getvalue()
 
         document.close()
 
