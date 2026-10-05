@@ -590,7 +590,7 @@ def remove_background_if_needed(
             round(contrast_score, 2),
             "| black-white:",
             round(bw_score, 2),
-        )
+        )    
     
 
  
