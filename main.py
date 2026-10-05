@@ -286,73 +286,349 @@ def remove_background_if_needed(
             interpolation=cv2.INTER_AREA,
         )
 
+  
     # --------------------------------------------------
-    # FORBEHANDLING TIL REMBG
+    # REMBG – ORIGINAL + AUTOMATISK FALLBACK
     # --------------------------------------------------
-    # Sort/hvid + lokal kontrastforbedring.
-    # Bruges KUN som input til segmenteringsmodellen.
-    # Originalbilledet ændres ikke.
     
-    if len(img.shape) == 3 and img.shape[2] == 4:
-        gray = cv2.cvtColor(
-            img,
-            cv2.COLOR_BGRA2GRAY,
+    def run_rembg(input_img):
+    
+        ok, buffer = cv2.imencode(
+            ".png",
+            input_img,
         )
+    
+        if not ok:
+            raise ValueError(
+                "Could not encode image for background removal"
+            )
+    
+        output = remove(
+            buffer.tobytes(),
+            session=get_rembg_session(),
+        )
+    
+        arr = np.frombuffer(
+            output,
+            np.uint8,
+        )
+    
+        result = cv2.imdecode(
+            arr,
+            cv2.IMREAD_UNCHANGED,
+        )
+    
+        if result is None:
+            raise ValueError(
+                "Background removal failed"
+            )
+    
+        return result
+    
+    
+    def mask_quality_score(result):
+    
+        # Vi skal have alpha-kanal
+        if (
+            len(result.shape) != 3
+            or result.shape[2] != 4
+        ):
+            return -1000.0
+    
+        alpha = result[:, :, 3]
+    
+        # Lav binær maske
+        mask = np.where(
+            alpha > 128,
+            255,
+            0,
+        ).astype(np.uint8)
+    
+        contours, _ = cv2.findContours(
+            mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+    
+        if not contours:
+            return -1000.0
+    
+        largest = max(
+            contours,
+            key=cv2.contourArea,
+        )
+    
+        area = cv2.contourArea(
+            largest
+        )
+    
+        h, w = mask.shape
+    
+        image_area = float(
+            h * w
+        )
+    
+        if image_area <= 0:
+            return -1000.0
+    
+        area_ratio = (
+            area / image_area
+        )
+    
+        x, y, cw, ch = cv2.boundingRect(
+            largest
+        )
+    
+        # ----------------------------------------------
+        # HVOR MEGET RAMMER MASKEN BILLEDKANTERNE?
+        # ----------------------------------------------
+    
+        margin_x = max(
+            3,
+            int(w * 0.015),
+        )
+    
+        margin_y = max(
+            3,
+            int(h * 0.015),
+        )
+    
+        touches_left = (
+            x <= margin_x
+        )
+    
+        touches_right = (
+            x + cw >= w - margin_x
+        )
+    
+        touches_top = (
+            y <= margin_y
+        )
+    
+        touches_bottom = (
+            y + ch >= h - margin_y
+        )
+    
+        edge_count = sum([
+            touches_left,
+            touches_right,
+            touches_top,
+            touches_bottom,
+        ])
+    
+        # ----------------------------------------------
+        # SCORE
+        # ----------------------------------------------
+    
+        score = 100.0
+    
+        # Person må gerne ramme bunden.
+        # Det er normalt ved portrætter.
+        if touches_bottom:
+            score -= 2.0
+    
+        # Venstre/højre/top er mere mistænkeligt.
+        if touches_left:
+            score -= 25.0
+    
+        if touches_right:
+            score -= 25.0
+    
+        if touches_top:
+            score -= 20.0
+    
+        # Flere billedkanter samtidig er meget mistænkeligt
+        if edge_count >= 3:
+            score -= 40.0
+    
+        # Næsten hele billedet valgt = sandsynlig baggrund
+        if area_ratio > 0.85:
+            score -= 80.0
+    
+        elif area_ratio > 0.70:
+            score -= 50.0
+    
+        elif area_ratio > 0.55:
+            score -= 25.0
+    
+        # Ekstremt lille objekt er også mistænkeligt
+        if area_ratio < 0.02:
+            score -= 40.0
+    
+        return score
+    
+    
+    def make_fallback_image(input_img):
+    
+        # ----------------------------------------------
+        # NOIR-LIGNENDE FORBEHANDLING
+        # ----------------------------------------------
+    
+        if (
+            len(input_img.shape) == 3
+            and input_img.shape[2] == 4
+        ):
+            gray = cv2.cvtColor(
+                input_img,
+                cv2.COLOR_BGRA2GRAY,
+            )
+    
+        else:
+            gray = cv2.cvtColor(
+                input_img,
+                cv2.COLOR_BGR2GRAY,
+            )
+    
+        # ----------------------------------------------
+        # AUTOCONTRAST
+        # ----------------------------------------------
+        # Find reelt sort/hvid-punkt i billedet.
+        # Vi bruger percentiler for ikke at lade enkelte
+        # pixels bestemme hele kontrasten.
+        # ----------------------------------------------
+    
+        low = np.percentile(
+            gray,
+            2,
+        )
+    
+        high = np.percentile(
+            gray,
+            98,
+        )
+    
+        if high > low:
+    
+            gray = np.clip(
+                (
+                    gray.astype(np.float32)
+                    - low
+                )
+                * (
+                    255.0
+                    / (high - low)
+                ),
+                0,
+                255,
+            ).astype(np.uint8)
+    
+        # ----------------------------------------------
+        # S-KURVE / KONTRAST
+        # ----------------------------------------------
+    
+        normalized = (
+            gray.astype(np.float32)
+            / 255.0
+        )
+    
+        # Sigmoid-lignende kontrast omkring mellemtonerne
+        contrast = 1.45
+    
+        normalized = (
+            normalized - 0.5
+        ) * contrast + 0.5
+    
+        normalized = np.clip(
+            normalized,
+            0.0,
+            1.0,
+        )
+    
+        gray = (
+            normalized * 255
+        ).astype(np.uint8)
+    
+        # ----------------------------------------------
+        # MILD LOKAL KONTRAST
+        # ----------------------------------------------
+    
+        clahe = cv2.createCLAHE(
+            clipLimit=1.5,
+            tileGridSize=(8, 8),
+        )
+    
+        gray = clahe.apply(
+            gray
+        )
+    
+        # rembg forventer almindeligt billede
+        fallback = cv2.cvtColor(
+            gray,
+            cv2.COLOR_GRAY2BGR,
+        )
+    
+        return fallback
+    
+    
+    # --------------------------------------------------
+    # 1. PRØV ALTID ORIGINALEN FØRST
+    # --------------------------------------------------
+    
+    img_out_original = run_rembg(
+        img
+    )
+    
+    original_score = mask_quality_score(
+        img_out_original
+    )
+    
+    
+    # --------------------------------------------------
+    # 2. KUN HVIS RESULTATET SER MISTÆNKELIGT UD:
+    #    PRØV SORT/HVID FALLBACK
+    # --------------------------------------------------
+    
+    FALLBACK_TRIGGER_SCORE = 55.0
+    
+    if original_score < FALLBACK_TRIGGER_SCORE:
+    
+        fallback_img = make_fallback_image(
+            img
+        )
+    
+        img_out_fallback = run_rembg(
+            fallback_img
+        )
+    
+        fallback_score = mask_quality_score(
+            img_out_fallback
+        )
+    
+        # Brug kun fallback hvis den faktisk er bedre
+        if fallback_score > original_score:
+    
+            img_out = img_out_fallback
+    
+            print(
+                "AVART: fallback selected",
+                "original score:",
+                round(original_score, 2),
+                "fallback score:",
+                round(fallback_score, 2),
+            )
+    
+        else:
+    
+            img_out = img_out_original
+    
+            print(
+                "AVART: original retained",
+                "original score:",
+                round(original_score, 2),
+                "fallback score:",
+                round(fallback_score, 2),
+            )
+    
     else:
-        gray = cv2.cvtColor(
-            img,
-            cv2.COLOR_BGR2GRAY,
+    
+        img_out = img_out_original
+    
+        print(
+            "AVART: original accepted",
+            "score:",
+            round(original_score, 2),
         )
-    
-    # Forbedr lokal kontrast uden at smadre højlys/skygger.
-    clahe = cv2.createCLAHE(
-        clipLimit=2.0,
-        tileGridSize=(8, 8),
-    )
-    
-    gray = clahe.apply(gray)
-    
-    # Mild global kontrastforøgelse
-    gray = cv2.convertScaleAbs(
-        gray,
-        alpha=1.20,
-        beta=0,
-    )
-    
-    # Tilbage til 3 kanaler til rembg
-    rembg_img = cv2.cvtColor(
-        gray,
-        cv2.COLOR_GRAY2BGR,
-    )
-    
-    # --------------------------------------------------
-    # REMBG
-    # --------------------------------------------------
-    
-    ok, buffer = cv2.imencode(
-        ".png",
-        rembg_img,
-    )
-
-    if not ok:
-        raise ValueError(
-            "Could not encode resized image"
-        )
-
-    output = remove(
-        buffer.tobytes(),
-        session=get_rembg_session(),
-    )
-
-    arr_out = np.frombuffer(
-        output,
-        np.uint8,
-    )
-
-    img_out = cv2.imdecode(
-        arr_out,
-        cv2.IMREAD_UNCHANGED,
-    )
+ 
 
     if img_out is None:
         raise ValueError(
