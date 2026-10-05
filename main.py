@@ -456,178 +456,143 @@ def remove_background_if_needed(
             score -= 40.0
     
         return score
+       
     
+        # --------------------------------------------------
+        # AVART REMBG – ORIGINAL / LET KONTRAST / SORT-HVID
+        # --------------------------------------------------
     
-    def make_fallback_image(input_img):
+        def make_contrast_image(input_img, contrast=1.18):
+            """
+            Giver billedet en lille global kontrastforøgelse.
+            Ingen CLAHE, autocontrast eller anden kraftig behandling.
+            """
     
-        # ----------------------------------------------
-        # NOIR-LIGNENDE FORBEHANDLING
-        # ----------------------------------------------
+            if len(input_img.shape) == 3 and input_img.shape[2] == 4:
+                bgr = input_img[:, :, :3]
+            else:
+                bgr = input_img
     
-        if (
-            len(input_img.shape) == 3
-            and input_img.shape[2] == 4
-        ):
-            gray = cv2.cvtColor(
-                input_img,
-                cv2.COLOR_BGRA2GRAY,
+            # Kontrast omkring mellemgrå (127.5)
+            contrasted = cv2.convertScaleAbs(
+                bgr,
+                alpha=contrast,
+                beta=127.5 * (1.0 - contrast),
             )
     
-        else:
-            gray = cv2.cvtColor(
-                input_img,
-                cv2.COLOR_BGR2GRAY,
-            )
+            return contrasted
     
-        # ----------------------------------------------
-        # AUTOCONTRAST
-        # ----------------------------------------------
-        # Find reelt sort/hvid-punkt i billedet.
-        # Vi bruger percentiler for ikke at lade enkelte
-        # pixels bestemme hele kontrasten.
-        # ----------------------------------------------
     
-        low = np.percentile(
-            gray,
-            2,
-        )
+        def make_bw_image(input_img):
+            """
+            Ren sort/hvid-version uden ekstra kontrastbehandling.
+            """
     
-        high = np.percentile(
-            gray,
-            98,
-        )
-    
-        if high > low:
-    
-            gray = np.clip(
-                (
-                    gray.astype(np.float32)
-                    - low
+            if len(input_img.shape) == 3 and input_img.shape[2] == 4:
+                gray = cv2.cvtColor(
+                    input_img,
+                    cv2.COLOR_BGRA2GRAY,
                 )
-                * (
-                    255.0
-                    / (high - low)
-                ),
-                0,
-                255,
-            ).astype(np.uint8)
+            else:
+                gray = cv2.cvtColor(
+                    input_img,
+                    cv2.COLOR_BGR2GRAY,
+                )
     
-        # ----------------------------------------------
-        # S-KURVE / KONTRAST
-        # ----------------------------------------------
-    
-        normalized = (
-            gray.astype(np.float32)
-            / 255.0
-        )
-    
-        # Sigmoid-lignende kontrast omkring mellemtonerne
-        contrast = 1.45
-    
-        normalized = (
-            normalized - 0.5
-        ) * contrast + 0.5
-    
-        normalized = np.clip(
-            normalized,
-            0.0,
-            1.0,
-        )
-    
-        gray = (
-            normalized * 255
-        ).astype(np.uint8)
-    
-        # ----------------------------------------------
-        # MILD LOKAL KONTRAST
-        # ----------------------------------------------
-    
-        clahe = cv2.createCLAHE(
-            clipLimit=1.5,
-            tileGridSize=(8, 8),
-        )
-    
-        gray = clahe.apply(
-            gray
-        )
-    
-        # rembg forventer almindeligt billede
-        fallback = cv2.cvtColor(
-            gray,
-            cv2.COLOR_GRAY2BGR,
-        )
-    
-        return fallback
+            return cv2.cvtColor(
+                gray,
+                cv2.COLOR_GRAY2BGR,
+            )
     
     
-    # --------------------------------------------------
-    # 1. PRØV ALTID ORIGINALEN FØRST
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # 1. ORIGINAL
+        # --------------------------------------------------
     
-    img_out_original = run_rembg(
-        img
-    )
-    
-    original_score = mask_quality_score(
-        img_out_original
-    )
-    
-    
-    # --------------------------------------------------
-    # 2. KUN HVIS RESULTATET SER MISTÆNKELIGT UD:
-    #    PRØV SORT/HVID FALLBACK
-    # --------------------------------------------------
-    
-    FALLBACK_TRIGGER_SCORE = 55.0
-    
-    if original_score < FALLBACK_TRIGGER_SCORE:
-    
-        fallback_img = make_fallback_image(
+        img_out_original = run_rembg(
             img
         )
     
-        img_out_fallback = run_rembg(
-            fallback_img
+        original_score = mask_quality_score(
+            img_out_original
         )
     
-        fallback_score = mask_quality_score(
-            img_out_fallback
+    
+        # --------------------------------------------------
+        # 2. LET KONTRAST
+        # --------------------------------------------------
+    
+        contrast_img = make_contrast_image(
+            img,
+            contrast=1.18,
         )
     
-        # Brug kun fallback hvis den faktisk er bedre
-        if fallback_score > original_score:
+        img_out_contrast = run_rembg(
+            contrast_img
+        )
     
-            img_out = img_out_fallback
+        contrast_score = mask_quality_score(
+            img_out_contrast
+        )
     
-            print(
-                "AVART: fallback selected",
-                "original score:",
-                round(original_score, 2),
-                "fallback score:",
-                round(fallback_score, 2),
-            )
     
-        else:
+        # --------------------------------------------------
+        # 3. SORT/HVID
+        # --------------------------------------------------
     
-            img_out = img_out_original
+        bw_img = make_bw_image(
+            img
+        )
     
-            print(
-                "AVART: original retained",
-                "original score:",
-                round(original_score, 2),
-                "fallback score:",
-                round(fallback_score, 2),
-            )
+        img_out_bw = run_rembg(
+            bw_img
+        )
     
-    else:
+        bw_score = mask_quality_score(
+            img_out_bw
+        )
     
-        img_out = img_out_original
+    
+        # --------------------------------------------------
+        # VÆLG DET BEDSTE RESULTAT
+        # --------------------------------------------------
+    
+        candidates = [
+            (
+                "original",
+                original_score,
+                img_out_original,
+            ),
+            (
+                "contrast",
+                contrast_score,
+                img_out_contrast,
+            ),
+            (
+                "black-white",
+                bw_score,
+                img_out_bw,
+            ),
+        ]
+    
+        selected_name, selected_score, img_out = max(
+            candidates,
+            key=lambda item: item[1],
+        )
     
         print(
-            "AVART: original accepted",
-            "score:",
+            "AVART rembg:",
+            "selected:",
+            selected_name,
+            "| original:",
             round(original_score, 2),
+            "| contrast:",
+            round(contrast_score, 2),
+            "| black-white:",
+            round(bw_score, 2),
         )
+    
+
  
 
     if img_out is None:
