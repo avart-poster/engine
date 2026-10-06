@@ -906,48 +906,13 @@ def contour_to_svg(
 
     if mask is not None:
 
-        # ----------------------------------------------
+        # --------------------------------------------------
         # INDVENDIGE NEGATIVE RUM
-        # fx mellem hestehale og nakke
-        # ----------------------------------------------
-
-        inner_contours = (
-            get_significant_inner_contours(
-                mask
-            )
-        )
-
-        for inner in inner_contours:
-
-            inner = inner.copy()
-
-            inner[:, 0, 1] += anchor_shift
-
-            inner_pts = inner[:, 0, :]
-
-            if len(inner_pts) < 2:
-                continue
-
-            inner_d = [
-                (
-                    f"M "
-                    f"{inner_pts[0][0]:.2f} "
-                    f"{inner_pts[0][1]:.2f}"
-                )
-            ]
-
-            for p in inner_pts[1:]:
-
-                inner_d.append(
-                    f"L {p[0]:.2f} {p[1]:.2f}"
-                )
-
-            # Luk hullet
-            inner_d.append("Z")
-
-            extra_paths.append(
-                " ".join(inner_d)
-            )
+        # Midlertidigt slået fra:
+        # Avart tegner kun den ydre silhuet.
+        # --------------------------------------------------
+        
+        inner_contours = []
 
         # ----------------------------------------------
         # SEKUNDÆRE YDRE KONTURER
