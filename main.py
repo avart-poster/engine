@@ -287,303 +287,33 @@ def remove_background_if_needed(
         )
 
     # --------------------------------------------------
-    # REMBG – ORIGINAL + AUTOMATISK FALLBACK
+    # REMBG – ORIGINALBILLEDET
     # --------------------------------------------------
 
-    def run_rembg(input_img):
-
-        ok, buffer = cv2.imencode(
-            ".png",
-            input_img,
-        )
-
-        if not ok:
-            raise ValueError(
-                "Could not encode image for background removal"
-            )
-
-        output = remove(
-            buffer.tobytes(),
-            session=get_rembg_session(),
-        )
-
-        arr = np.frombuffer(
-            output,
-            np.uint8,
-        )
-
-        result = cv2.imdecode(
-            arr,
-            cv2.IMREAD_UNCHANGED,
-        )
-
-        if result is None:
-            raise ValueError(
-                "Background removal failed"
-            )
-
-        return result
-
-
-    def mask_quality_score(result):
-
-        if (
-            len(result.shape) != 3
-            or result.shape[2] != 4
-        ):
-            return -1000.0
-
-        alpha = result[:, :, 3]
-
-        mask = np.where(
-            alpha > 128,
-            255,
-            0,
-        ).astype(np.uint8)
-
-        contours, _ = cv2.findContours(
-            mask,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE,
-        )
-
-        if not contours:
-            return -1000.0
-
-        largest = max(
-            contours,
-            key=cv2.contourArea,
-        )
-
-        area = cv2.contourArea(
-            largest
-        )
-
-        h, w = mask.shape
-
-        image_area = float(
-            h * w
-        )
-
-        if image_area <= 0:
-            return -1000.0
-
-        area_ratio = (
-            area / image_area
-        )
-
-        x, y, cw, ch = cv2.boundingRect(
-            largest
-        )
-
-        # ----------------------------------------------
-        # HVOR MEGET RAMMER MASKEN BILLEDKANTERNE?
-        # ----------------------------------------------
-
-        margin_x = max(
-            3,
-            int(w * 0.015),
-        )
-
-        margin_y = max(
-            3,
-            int(h * 0.015),
-        )
-
-        touches_left = (
-            x <= margin_x
-        )
-
-        touches_right = (
-            x + cw >= w - margin_x
-        )
-
-        touches_top = (
-            y <= margin_y
-        )
-
-        touches_bottom = (
-            y + ch >= h - margin_y
-        )
-
-        edge_count = sum([
-            touches_left,
-            touches_right,
-            touches_top,
-            touches_bottom,
-        ])
-
-        # ----------------------------------------------
-        # SCORE
-        # ----------------------------------------------
-
-        score = 100.0
-
-        if touches_bottom:
-            score -= 2.0
-
-        if touches_left:
-            score -= 25.0
-
-        if touches_right:
-            score -= 25.0
-
-        if touches_top:
-            score -= 20.0
-
-        if edge_count >= 3:
-            score -= 40.0
-
-        if area_ratio > 0.85:
-            score -= 80.0
-
-        elif area_ratio > 0.70:
-            score -= 50.0
-
-        elif area_ratio > 0.55:
-            score -= 25.0
-
-        if area_ratio < 0.02:
-            score -= 40.0
-
-        return score
-
-
-    # --------------------------------------------------
-    # AVART REMBG – ORIGINAL / LET KONTRAST / SORT-HVID
-    # --------------------------------------------------
-
-    def make_contrast_image(
-        input_img,
-        contrast=1.18,
-    ):
-
-        if (
-            len(input_img.shape) == 3
-            and input_img.shape[2] == 4
-        ):
-            bgr = input_img[:, :, :3]
-        else:
-            bgr = input_img
-
-        contrasted = cv2.convertScaleAbs(
-            bgr,
-            alpha=contrast,
-            beta=127.5 * (1.0 - contrast),
-        )
-
-        return contrasted
-
-
-    def make_bw_image(input_img):
-
-        if (
-            len(input_img.shape) == 3
-            and input_img.shape[2] == 4
-        ):
-            gray = cv2.cvtColor(
-                input_img,
-                cv2.COLOR_BGRA2GRAY,
-            )
-        else:
-            gray = cv2.cvtColor(
-                input_img,
-                cv2.COLOR_BGR2GRAY,
-            )
-
-        return cv2.cvtColor(
-            gray,
-            cv2.COLOR_GRAY2BGR,
-        )
-
-
-    # --------------------------------------------------
-    # 1. ORIGINAL
-    # --------------------------------------------------
-
-    img_out_original = run_rembg(
-        img
-    )
-
-    original_score = mask_quality_score(
-        img_out_original
-    )
-
-
-    # --------------------------------------------------
-    # 2. LET KONTRAST
-    # --------------------------------------------------
-
-    contrast_img = make_contrast_image(
+    ok, buffer = cv2.imencode(
+        ".png",
         img,
-        contrast=1.18,
     )
 
-    img_out_contrast = run_rembg(
-        contrast_img
+    if not ok:
+        raise ValueError(
+            "Could not encode image for background removal"
+        )
+
+    output = remove(
+        buffer.tobytes(),
+        session=get_rembg_session(),
     )
 
-    contrast_score = mask_quality_score(
-        img_out_contrast
+    arr_out = np.frombuffer(
+        output,
+        np.uint8,
     )
 
-
-    # --------------------------------------------------
-    # 3. SORT/HVID
-    # --------------------------------------------------
-
-    bw_img = make_bw_image(
-        img
+    img_out = cv2.imdecode(
+        arr_out,
+        cv2.IMREAD_UNCHANGED,
     )
-
-    img_out_bw = run_rembg(
-        bw_img
-    )
-
-    bw_score = mask_quality_score(
-        img_out_bw
-    )
-
-
-    # --------------------------------------------------
-    # VÆLG DET BEDSTE RESULTAT
-    # --------------------------------------------------
-
-    candidates = [
-        (
-            "original",
-            original_score,
-            img_out_original,
-        ),
-        (
-            "contrast",
-            contrast_score,
-            img_out_contrast,
-        ),
-        (
-            "black-white",
-            bw_score,
-            img_out_bw,
-        ),
-    ]
-
-    selected_name, selected_score, img_out = max(
-        candidates,
-        key=lambda item: item[1],
-    )
-
-    print(
-        "AVART rembg:",
-        "selected:",
-        selected_name,
-        "| original:",
-        round(original_score, 2),
-        "| contrast:",
-        round(contrast_score, 2),
-        "| black-white:",
-        round(bw_score, 2),
-    )
-      
 
  
 
