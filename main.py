@@ -2929,8 +2929,6 @@ async def poster_preview(
     
     size: str = Query("50x70"),
     
-    ):
-
 ):
     try:
 
