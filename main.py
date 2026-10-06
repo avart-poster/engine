@@ -2835,10 +2835,9 @@ async def poster_pdf(
     
     size: str = Query("50x70"),
     
-    ):
+):
     
 
-):
     try:
 
         pdf_bytes = build_poster_pdf(
