@@ -1450,30 +1450,39 @@ def generate_poster_pdf(
         # Personen forbliver ALTID forankret i bunden.
 
         if orientation == "landscape":
-            # 700 × 500 mm
-            top_positions_mm = {
+            reference_height_mm = 500
+        
+            reference_top_positions_mm = {
                 -2: 180,
                 -1: 150,
-                 0: 120,
-                 1: 105,
-                 2: 90,
+                0: 120,
+                1: 105,
+                2: 90,
             }
-
+        
         else:
-            # 500 × 700 mm
-            top_positions_mm = {
+            reference_height_mm = 700
+        
+            reference_top_positions_mm = {
                 -2: 210,
                 -1: 185,
-                 0: 160,
-                 1: 135,
-                 2: 110,
+                0: 160,
+                1: 135,
+                2: 110,
             }
-
+        
+        height_ratio = page_h_mm / reference_height_mm
+        
+        top_positions_mm = {
+            level: position * height_ratio
+            for level, position in reference_top_positions_mm.items()
+        }
+        
         if scale_level not in top_positions_mm:
             raise ValueError(
                 "scale_level must be between -2 and 2"
             )
-
+        
         target_top_mm = top_positions_mm[scale_level]
 
         # Hvor høj skal silhuetten være fra bund til ønsket top?
@@ -1701,21 +1710,33 @@ def generate_multi_poster_pdf(
     # Silhuetten er ALTID forankret i bunden.
 
     if orientation == "landscape":
-        top_positions_mm = {
-        -2: 180,
-        -1: 150,
-         0: 120,
-         1: 105,
-         2: 90,
+        reference_height_mm = 500
+    
+        reference_top_positions_mm = {
+            -2: 180,
+            -1: 150,
+            0: 120,
+            1: 105,
+            2: 90,
         }
+    
     else:
-        top_positions_mm = {
-        -2: 210,
-        -1: 185,
-         0: 160,
-         1: 135,
-         2: 110,
+        reference_height_mm = 700
+    
+        reference_top_positions_mm = {
+            -2: 210,
+            -1: 185,
+            0: 160,
+            1: 135,
+            2: 110,
         }
+    
+    height_ratio = page_h_mm / reference_height_mm
+    
+    top_positions_mm = {
+        level: position * height_ratio
+        for level, position in reference_top_positions_mm.items()
+    }
 
 
     # ------------------------------------------------
