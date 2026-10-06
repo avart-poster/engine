@@ -53,7 +53,7 @@ ALPHA_THRESHOLD = 128
 SMOOTH_WINDOW = 19
 EPSILON_RATIO = 0.00020
 
-REMBG_MODEL = "isnet-general-use"
+REMBG_MODEL = "birefnet-portrait"
 
 
 # --------------------------------------------------
