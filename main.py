@@ -518,7 +518,7 @@ def get_smoothed_outer_contour(
 def get_secondary_outer_contours(
     mask: np.ndarray,
     main_contour: np.ndarray,
-    min_area_ratio: float = 0.00015,
+    min_area_ratio: float = 0.001,
     max_area_ratio: float = 0.05,
 ) -> list[np.ndarray]:
 
