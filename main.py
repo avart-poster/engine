@@ -418,8 +418,8 @@ def alpha_to_mask(
         0
     ).astype(np.uint8)
     
-    # Meget mild oprydning af små hårsprækker og pixelhak.
-    # Ingen blur – ansigtsprofilen bevares.
+    # Fjern meget tynde udstikkende hår/pixelstøj.
+    # Ingen blur – vi bevarer selve profilens form.
     kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (3, 3),
@@ -427,7 +427,7 @@ def alpha_to_mask(
     
     mask = cv2.morphologyEx(
         mask,
-        cv2.MORPH_CLOSE,
+        cv2.MORPH_OPEN,
         kernel,
         iterations=1,
     )
