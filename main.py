@@ -422,7 +422,7 @@ def alpha_to_mask(
     # Ingen blur – vi bevarer selve profilens form.
     kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
-        (3, 3),
+        (5, 5),
     )
     
     mask = cv2.morphologyEx(
