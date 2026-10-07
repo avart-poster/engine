@@ -11,3 +11,4 @@ pillow
 pymupdf
 pillow-heif
 mediapipe
+stripe
