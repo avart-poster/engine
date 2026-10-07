@@ -2068,7 +2068,17 @@ async def alpha_debug(
             max_dimension=max_dimension,
             return_original=True,
         )
-
+        
+        face_region = detect_face_region(
+            original_rgb
+        )
+        
+        print(
+            "FACE REGION:",
+            face_region,
+            flush=True,
+        )
+        
         mask = alpha_to_mask(
             rgba,
             alpha_threshold=alpha_threshold,
