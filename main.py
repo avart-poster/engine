@@ -123,6 +123,55 @@ def get_rembg_session():
     return _rembg_session
 
 
+def detect_face_region(original_rgb: np.ndarray):
+    """
+    Finder ansigtet i originalbilledet.
+
+    Returnerer:
+        (x, y, w, h)
+
+    eller None hvis intet ansigt findes.
+    """
+
+    gray = cv2.cvtColor(
+        original_rgb,
+        cv2.COLOR_RGB2GRAY,
+    )
+
+    cascade_path = (
+        cv2.data.haarcascades
+        + "haarcascade_frontalface_default.xml"
+    )
+
+    face_cascade = cv2.CascadeClassifier(
+        cascade_path
+    )
+
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(40, 40),
+    )
+
+    if len(faces) == 0:
+        return None
+
+    # Vælg det største fundne ansigt
+    face = max(
+        faces,
+        key=lambda f: f[2] * f[3],
+    )
+
+    x, y, w, h = [
+        int(v)
+        for v in face
+    ]
+
+    return x, y, w, h
+
+
+
 # --------------------------------------------------
 # Health
 # --------------------------------------------------
