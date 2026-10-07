@@ -10,3 +10,4 @@ onnxruntime
 pillow
 pymupdf
 pillow-heif
+mediapipe
