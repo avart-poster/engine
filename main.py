@@ -495,6 +495,7 @@ def get_smoothed_outer_contour(
     mask: np.ndarray,
     epsilon_ratio: float = 0.00020,
     smooth_window: int = 7,
+    face_region=None,
 ) -> np.ndarray:
 
     # --------------------------------------------------
@@ -548,25 +549,62 @@ def get_smoothed_outer_contour(
     n = len(points)
 
     if n >= smooth_window:
-        pad = smooth_window // 2
-
+    
+        # Normal smoothing bruges omkring ansigtet.
+        face_window = smooth_window
+    
+        # Resten af silhuetten glattes kraftigere.
+        body_window = min(31, smooth_window + 12)
+    
+        if body_window % 2 == 0:
+            body_window += 1
+    
+        max_window = max(face_window, body_window)
+        pad = max_window // 2
+    
         padded = np.vstack([
             points[-pad:],
             points,
             points[:pad],
         ])
-
+    
         smoothed = np.empty_like(points)
-
+    
         for i in range(n):
-            segment = padded[
-                i:i + smooth_window
-            ]
-
-            smoothed[i] = segment.mean(
-                axis=0
+            px, py = points[i]
+    
+            use_face_smoothing = False
+    
+            if face_region is not None:
+                fx, fy, fw, fh = face_region
+    
+                # Gør beskyttelsesområdet lidt større end
+                # selve ansigtsboksen.
+                margin_x = fw * 0.35
+                margin_y = fh * 0.20
+    
+                if (
+                    fx - margin_x <= px <= fx + fw + margin_x
+                    and fy - margin_y <= py <= fy + fh + margin_y
+                ):
+                    use_face_smoothing = True
+    
+            window = (
+                face_window
+                if use_face_smoothing
+                else body_window
             )
-
+    
+            half = window // 2
+            center = i + pad
+    
+            segment = padded[
+                center - half:
+                center + half + 1
+            ]
+    
+            smoothed[i] = segment.mean(axis=0)
+    
         points = smoothed
 
     # --------------------------------------------------
@@ -2097,6 +2135,7 @@ async def alpha_debug(
             mask,
             epsilon_ratio=epsilon_ratio,
             smooth_window=smooth_window,
+            face_region=face_region,
         )
 
         png = render_debug_png(
