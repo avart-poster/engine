@@ -124,6 +124,61 @@ def get_rembg_session():
     return _rembg_session
 
 
+
+# --------------------------------------------------
+# detect face
+# --------------------------------------------------
+
+
+def detect_face_region(original_rgb: np.ndarray):
+    """
+    Finder ansigt med OpenCV YuNet.
+    Returnerer (x, y, w, h) eller None.
+    """
+
+    h, w = original_rgb.shape[:2]
+
+    model_path = os.path.join(
+        os.path.dirname(__file__),
+        "models",
+        "face_detection_yunet_2023mar.onnx",
+    )
+
+    detector = cv2.FaceDetectorYN.create(
+        model_path,
+        "",
+        (w, h),
+        score_threshold=0.6,
+        nms_threshold=0.3,
+        top_k=5000,
+    )
+
+    bgr = cv2.cvtColor(
+        original_rgb,
+        cv2.COLOR_RGB2BGR,
+    )
+
+    detector.setInputSize((w, h))
+
+    _, faces = detector.detect(bgr)
+
+    if faces is None or len(faces) == 0:
+        return None
+
+    face = max(
+        faces,
+        key=lambda f: f[2] * f[3],
+    )
+
+    x, y, fw, fh = face[:4]
+
+    return (
+        int(x),
+        int(y),
+        int(fw),
+        int(fh),
+    )
+
 # --------------------------------------------------
 # Health
 # --------------------------------------------------
