@@ -2768,3 +2768,58 @@ async def poster_preview(
             },
             status_code=400,
         )
+
+# =============================================
+# STRIPE CHECKOUT
+# =============================================
+
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+
+
+@app.post("/create-checkout-session")
+async def create_checkout_session(data: dict):
+    try:
+        items = data.get("items", [])
+
+        if not items:
+            return JSONResponse(
+                {"error": "Kurven er tom."},
+                status_code=400
+            )
+
+        line_items = []
+
+        for item in items:
+            price = int(item["price"]) * 100
+            size = item["size"]
+            style = item["style"]
+
+            line_items.append({
+                "price_data": {
+                    "currency": "dkk",
+                    "product_data": {
+                        "name": f"AVART plakat – {size} – {style}"
+                    },
+                    "unit_amount": price
+                },
+                "quantity": 1
+            })
+
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=line_items,
+            success_url="https://avart.dk/?payment=success",
+            cancel_url="https://avart.dk/?payment=cancel"
+        )
+
+        return {
+            "url": session.url
+        }
+
+    except Exception as e:
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400
+        )
+
+
