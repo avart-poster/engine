@@ -2856,7 +2856,18 @@ async def create_checkout_session(data: dict):
         session = stripe.checkout.Session.create(
             mode="payment",
             line_items=line_items,
-            success_url="https://avart.dk/?payment=success",
+        
+            billing_address_collection="required",
+        
+            shipping_address_collection={
+                "allowed_countries": ["DK"]
+            },
+        
+            success_url=(
+                "https://avart.dk/?payment=success"
+                "&session_id={CHECKOUT_SESSION_ID}"
+            ),
+        
             cancel_url="https://avart.dk/?payment=cancel"
         )
 
