@@ -2894,7 +2894,7 @@ async def get_checkout_session(session_id: str = Query(...)):
             "id": session.id,
             "payment_status": session.payment_status,
             "customer_details": session.customer_details,
-            "shipping_details": session.get("shipping_details"),
+            "shipping_details": session.to_dict().get("shipping_details"),
             "amount_total": session.amount_total,
             "currency": session.currency,
         }
