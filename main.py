@@ -2882,3 +2882,27 @@ async def create_checkout_session(data: dict):
         )
 
 
+
+@app.get("/checkout-session")
+async def get_checkout_session(session_id: str = Query(...)):
+    try:
+        session = stripe.checkout.Session.retrieve(
+            session_id
+        )
+
+        return {
+            "id": session.id,
+            "payment_status": session.payment_status,
+            "customer_details": session.customer_details,
+            "shipping_details": session.shipping_details,
+            "amount_total": session.amount_total,
+            "currency": session.currency,
+        }
+
+    except Exception as e:
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400
+        )
+
+
