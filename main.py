@@ -2359,11 +2359,22 @@ async def poster_process(
 
         for index, file in enumerate(files):
 
-            rgba = remove_background_if_needed(
+            rgba, original_rgb = remove_background_if_needed(
                 file,
                 max_dimension=max_dimension,
+                return_original=True,
             )
-
+            
+            face_region = detect_face_region(
+                original_rgb
+            )
+            
+            print(
+                "POSTER FACE REGION:",
+                face_region,
+                flush=True,
+            )
+            
             h, w = rgba.shape[:2]
 
             mask = alpha_to_mask(
@@ -2376,6 +2387,7 @@ async def poster_process(
                 mask,
                 epsilon_ratio=epsilon_ratio,
                 smooth_window=smooth_window,
+                face_region=face_region,
             )
 
             head_width = estimate_head_width(
