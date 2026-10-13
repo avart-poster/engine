@@ -556,8 +556,9 @@ def get_smoothed_outer_contour(
 
     if n >= smooth_window:
     
-        # Normal smoothing bruges omkring ansigtet.
-        face_window = smooth_window
+        # Meget mild smoothing omkring ansigtet.
+        # Bevarer flere detaljer i næse, læber og hage.
+        face_window = 5
     
         # Resten af silhuetten glattes kraftigere.
         body_window = min(31, smooth_window + 12)
