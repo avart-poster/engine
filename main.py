@@ -5,7 +5,7 @@ import stripe
 
 from typing import Annotated
 import pymupdf
-from PIL import Image
+from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 
 import cv2
@@ -217,37 +217,43 @@ def remove_background_if_needed(
     if not data:
         raise ValueError("Empty file")
 
-    # --------------------------------------------------
-    # ÅBN ORIGINALBILLEDE
-    # JPEG / PNG / WEBP via OpenCV
-    # HEIC / HEIF via Pillow + pillow-heif
-    # --------------------------------------------------
+# --------------------------------------------------
+# ÅBN BILLEDE MED KORREKT ORIENTERING
+# JPEG / PNG / WEBP / HEIC / HEIF
+# Bevar eventuel transparens
+# --------------------------------------------------
 
-    arr = np.frombuffer(data, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+try:
+    pil_image = Image.open(io.BytesIO(data))
+    pil_image.load()
 
-    if img is None:
-        try:
-            pil_image = Image.open(io.BytesIO(data))
-            pil_image.load()
+    # Anvend EXIF-orientering, så billedet
+    # ikke drejes forkert under behandlingen.
+    pil_image = ImageOps.exif_transpose(pil_image)
 
-            if "A" in pil_image.getbands():
-                pil_image = pil_image.convert("RGBA")
-                img = cv2.cvtColor(
-                    np.array(pil_image),
-                    cv2.COLOR_RGBA2BGRA,
-                )
-            else:
-                pil_image = pil_image.convert("RGB")
-                img = cv2.cvtColor(
-                    np.array(pil_image),
-                    cv2.COLOR_RGB2BGR,
-                )
+    if "A" in pil_image.getbands() or "transparency" in pil_image.info:
 
-        except Exception as e:
-            raise ValueError(
-                f"Could not decode image: {e}"
-            )
+        pil_image = pil_image.convert("RGBA")
+
+        img = cv2.cvtColor(
+            np.array(pil_image),
+            cv2.COLOR_RGBA2BGRA,
+        )
+
+    else:
+
+        pil_image = pil_image.convert("RGB")
+
+        img = cv2.cvtColor(
+            np.array(pil_image),
+            cv2.COLOR_RGB2BGR,
+        )
+
+except Exception as e:
+
+    raise ValueError(
+        f"Could not decode image: {e}"
+    )
 
     # --------------------------------------------------
     # GEM ORIGINALEN FØR REMBG
