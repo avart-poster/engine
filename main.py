@@ -274,50 +274,50 @@ except Exception as e:
     # HVIS UPLOAD ALLEREDE HAR ÆGTE TRANSPARENCY
     # --------------------------------------------------
 
-    if len(img.shape) == 3 and img.shape[2] == 4:
-        alpha = img[:, :, 3]
-
-        if np.any(alpha < 250):
-            rgba = cv2.cvtColor(
-                img,
-                cv2.COLOR_BGRA2RGBA,
-            )
-
-            rgba = resize_if_needed_rgba(
-                rgba,
-                max_dimension=max_dimension,
-            )
-
-            original_rgb = cv2.resize(
-                original_rgb,
-                (rgba.shape[1], rgba.shape[0]),
-                interpolation=cv2.INTER_AREA,
-            )
-
-            rgba = cv2.copyMakeBorder(
-                rgba,
-                0,
-                180,
-                0,
-                0,
-                cv2.BORDER_CONSTANT,
-                value=(0, 0, 0, 0),
-            )
-
-            original_rgb = cv2.copyMakeBorder(
-                original_rgb,
-                0,
-                180,
-                0,
-                0,
-                cv2.BORDER_CONSTANT,
-                value=(255, 255, 255),
-            )
-
-            if return_original:
-                return rgba, original_rgb
-
-            return rgba
+        if len(img.shape) == 3 and img.shape[2] == 4:
+            alpha = img[:, :, 3]
+    
+            if np.any(alpha < 250):
+                rgba = cv2.cvtColor(
+                    img,
+                    cv2.COLOR_BGRA2RGBA,
+                )
+    
+                rgba = resize_if_needed_rgba(
+                    rgba,
+                    max_dimension=max_dimension,
+                )
+    
+                original_rgb = cv2.resize(
+                    original_rgb,
+                    (rgba.shape[1], rgba.shape[0]),
+                    interpolation=cv2.INTER_AREA,
+                )
+    
+                rgba = cv2.copyMakeBorder(
+                    rgba,
+                    0,
+                    180,
+                    0,
+                    0,
+                    cv2.BORDER_CONSTANT,
+                    value=(0, 0, 0, 0),
+                )
+    
+                original_rgb = cv2.copyMakeBorder(
+                    original_rgb,
+                    0,
+                    180,
+                    0,
+                    0,
+                    cv2.BORDER_CONSTANT,
+                    value=(255, 255, 255),
+                )
+    
+                if return_original:
+                    return rgba, original_rgb
+    
+                return rgba
 
     # --------------------------------------------------
     # RESIZE FØR REMBG
