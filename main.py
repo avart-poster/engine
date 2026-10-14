@@ -2566,6 +2566,16 @@ async def poster_render(
         # PDF → PNG PREVIEW
         # ---------------------------------------------
 
+        # HEX-farver til skærmvisning
+        preview_colors = {
+            "light": "#FBFAF7",
+            "dark": "#000000",
+            "moss": "#004122",
+            "wine": "#5D352A",
+            "camel": "#987D58",
+            "sea": "#00405E",
+        }
+
         document = pymupdf.open(
             stream=pdf_bytes,
             filetype="pdf",
@@ -2582,12 +2592,37 @@ async def poster_render(
         preview_rgba = Image.open(
             io.BytesIO(pixmap.tobytes("png"))
         ).convert("RGBA")
+
+        # Erstat CMYK-baggrunden med den præcise HEX-farve
+        if style != "light":
+            preview_rgb = preview_rgba.convert("RGB")
+            pixels = np.array(preview_rgb)
+        
+            # Baggrundsfarven aflæses i øverste venstre hjørne
+            background_rgb = pixels[0, 0].copy()
+        
+            # Find pixels med samme farve som baggrunden
+            difference = np.max(
+                np.abs(pixels.astype(np.int16) - background_rgb.astype(np.int16)),
+                axis=2,
+            )
+        
+            background_mask = difference <= 2
+        
+            # Udskift kun baggrundens pixels
+            target_rgb = tuple(
+                bytes.fromhex(preview_colors[style].lstrip("#"))
+            )
+        
+            pixels[background_mask] = target_rgb
+        
+            preview_rgba = Image.fromarray(pixels, "RGB").convert("RGBA")
         
         # LIGHT baggrund kun til preview på hjemmesiden
         preview_background = Image.new(
             "RGBA",
             preview_rgba.size,
-            "#FBFAF7",
+            preview_colors[style],
         )
         
         preview_image = Image.alpha_composite(
