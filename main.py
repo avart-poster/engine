@@ -1436,16 +1436,28 @@ def generate_multi_poster_pdf(
 ) -> bytes:
 
     # ------------------------------------------------
-    # STYLE / FARVER
+    # STYLE / FARVER – CMYK TIL PRINT
     # ------------------------------------------------
 
-    if style == "dark":
-        bg_color = colors.HexColor("#2B2B2B")
-        fg_color = colors.HexColor("#EFEEEC")
+    style_colors = {
+        "light": None,
+        "dark": colors.CMYKColor(0, 0, 0, 100),
+        "moss": colors.CMYKColor(100, 50, 100, 50),
+        "wine": colors.CMYKColor(50, 75, 75, 50),
+        "camel": colors.CMYKColor(0, 25, 50, 50),
+        "sea": colors.CMYKColor(100, 50, 25, 50),
+    }
+
+    if style not in style_colors:
+        raise ValueError(f"Unknown poster style: {style}")
+
+    bg_color = style_colors[style]
+
+    # CMYK til tekst, silhuet og logo
+    if style == "light":
+        fg_color = colors.CMYKColor(0, 0, 0, 100)
     else:
-        # LIGHT har ingen baggrund i selve PDF'en
-        bg_color = None
-        fg_color = colors.HexColor("#2B2B2B")
+        fg_color = colors.CMYKColor(0, 0, 0, 0)
     
 
     # ------------------------------------------------
@@ -1971,10 +1983,7 @@ def generate_multi_poster_pdf(
                 # LOGOFARVE EFTER STYLE
                 # ----------------------------------------
 
-                if style == "dark":
-                    logo_color = colors.HexColor("#EFEEEC")
-                else:
-                    logo_color = colors.HexColor("#2B2B2B")
+                logo_color = fg_color
 
                 def recolor_logo(node):
 
@@ -2464,6 +2473,10 @@ async def poster_render(
         allowed_styles = {
             "light",
             "dark",
+            "moss",
+            "wine",
+            "camel",
+            "sea",
         }
 
         if style not in allowed_styles:
@@ -2574,7 +2587,7 @@ async def poster_render(
         preview_background = Image.new(
             "RGBA",
             preview_rgba.size,
-            "#F9F8F4",
+            "#FBFAF7",
         )
         
         preview_image = Image.alpha_composite(
@@ -2803,7 +2816,7 @@ async def poster_preview(
         preview_background = Image.new(
             "RGBA",
             preview_rgba.size,
-            "#F9F8F4",
+            "#FBFAF7",
         )
         
         preview_image = Image.alpha_composite(
