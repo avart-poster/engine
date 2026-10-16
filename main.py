@@ -213,7 +213,11 @@ def database_health():
             "database": "connected"
         }
 
-    except Exception:
+    except Exception as e:
+        print(
+            f"DATABASE CONNECTION ERROR: {type(e).__name__}: {e}",
+            flush=True
+        )
         return JSONResponse(
             {
                 "ok": False,
