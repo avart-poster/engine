@@ -2609,10 +2609,10 @@ async def poster_render(
         preview_colors = {
             "light": "#FBFAF7",
             "dark": "#000000",
-            "moss": "#004122",
+            "moss": "#444832",
             "wine": "#5D352A",
             "camel": "#987D58",
-            "sea": "#00405E",
+            "sea": "#1A404E",
         }
 
         document = pymupdf.open(
