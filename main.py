@@ -2,6 +2,7 @@ import io
 import os
 import tempfile
 import stripe
+import pymysql
 
 from typing import Annotated
 import pymupdf
@@ -186,6 +187,40 @@ def detect_face_region(original_rgb: np.ndarray):
 @app.get("/health")
 def health():
     return {"ok": True, "service": "avart-engine"}
+
+
+@app.get("/health/database")
+def database_health():
+    try:
+        connection = pymysql.connect(
+            host=os.environ["DB_HOST"],
+            port=int(os.environ.get("DB_PORT", "3306")),
+            user=os.environ["DB_USER"],
+            password=os.environ["DB_PASSWORD"],
+            database=os.environ["DB_NAME"],
+            connect_timeout=10,
+            read_timeout=10,
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+
+        connection.close()
+
+        return {
+            "ok": True,
+            "database": "connected"
+        }
+
+    except Exception:
+        return JSONResponse(
+            {
+                "ok": False,
+                "database": "connection_failed"
+            },
+            status_code=503,
+        )
 
 
 # --------------------------------------------------
