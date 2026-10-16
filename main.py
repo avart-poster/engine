@@ -188,6 +188,26 @@ def detect_face_region(original_rgb: np.ndarray):
 def health():
     return {"ok": True, "service": "avart-engine"}
 
+# ---------------------------------------------
+# DATABASE CONNECTION – AVART ORDERS
+# ---------------------------------------------
+
+def get_db_connection():
+    return pymysql.connect(
+        host=os.environ["DB_HOST"],
+        port=int(os.environ.get("DB_PORT", "3306")),
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        database=os.environ["DB_NAME"],
+        charset="utf8mb4",
+        connect_timeout=10,
+        read_timeout=10,
+        write_timeout=10,
+        autocommit=False,
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+
 
 @app.get("/health/database")
 def database_health():
