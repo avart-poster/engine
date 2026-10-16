@@ -12,3 +12,4 @@ pymupdf
 pillow-heif
 mediapipe
 stripe
+PyMySQL>=1.1,<2
