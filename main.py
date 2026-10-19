@@ -3154,6 +3154,19 @@ async def create_checkout_session(data: dict):
             mode="payment",
             line_items=line_items,
 
+            shipping_options=[
+                {
+                    "shipping_rate_data": {
+                        "type": "fixed_amount",
+                        "fixed_amount": {
+                            "amount": 4900,
+                            "currency": "dkk",
+                        },
+                        "display_name": "GLS-fragt",
+                    }
+                }
+            ],
+
             client_reference_id=order_number,
 
             metadata={
