@@ -2975,21 +2975,75 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 @app.post("/create-checkout-session")
 async def create_checkout_session(data: dict):
+
+    prices = {
+        "a3": 299,
+        "a2": 399,
+        "50x70": 499,
+        "a1": 599,
+    }
+
+    allowed_styles = {
+        "light", "dark", "moss",
+        "wine", "camel", "sea",
+    }
+
+    items = data.get("items", [])
+
+    if not isinstance(items, list) or not 1 <= len(items) <= 20:
+        return JSONResponse(
+            {"error": "Kurven er tom eller ugyldig."},
+            status_code=400,
+        )
+
+    line_items = []
+    validated_items = []
+    subtotal = 0
+
     try:
-        items = data.get("items", [])
+        for index, item in enumerate(items, start=1):
 
-        if not items:
-            return JSONResponse(
-                {"error": "Kurven er tom."},
-                status_code=400
-            )
-
-        line_items = []
-
-        for item in items:
-            price = int(item["price"]) * 100
             size = item["size"]
             style = item["style"]
+            name = item.get("name", "")
+            persons = item["persons"]
+
+            if size not in prices:
+                raise ValueError("Ugyldig plakatstørrelse.")
+
+            if style not in allowed_styles:
+                raise ValueError("Ugyldig plakatfarve.")
+
+            if not isinstance(name, str) or len(name) > 255:
+                raise ValueError("Ugyldig plakattekst.")
+
+            if not isinstance(persons, list) or not 1 <= len(persons) <= 6:
+                raise ValueError("Ugyldigt antal personer.")
+
+            for person in persons:
+                if not isinstance(person, dict):
+                    raise ValueError("Ugyldige persondata.")
+
+                if not isinstance(person.get("svg"), str) or not person["svg"]:
+                    raise ValueError("En person mangler SVG.")
+
+                if person.get("scale_level", 0) not in (-2, -1, 0, 1, 2):
+                    raise ValueError("Ugyldig skalering.")
+
+                if not isinstance(person.get("flipped", False), bool):
+                    raise ValueError("Ugyldig spejlvending.")
+
+            price = prices[size]
+            subtotal += price
+
+            validated_items.append({
+                "item_number": index,
+                "size": size,
+                "style": style,
+                "name": name,
+                "price": price,
+                "persons": persons,
+            })
 
             line_items.append({
                 "price_data": {
@@ -2997,40 +3051,162 @@ async def create_checkout_session(data: dict):
                     "product_data": {
                         "name": f"AVART plakat – {size} – {style}"
                     },
-                    "unit_amount": price
+                    "unit_amount": price * 100,
                 },
-                "quantity": 1
+                "quantity": 1,
             })
 
+    except (KeyError, TypeError, ValueError) as e:
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=400,
+        )
+
+    # Unikt ordrenummer, fx AVA-A81C92F04D
+    order_number = "AVA-" + secrets.token_hex(5).upper()
+
+    connection = None
+    order_id = None
+
+    try:
+        connection = get_db_connection()
+
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                INSERT INTO orders (
+                    order_number,
+                    payment_status,
+                    order_status,
+                    subtotal_dkk,
+                    shipping_dkk,
+                    total_dkk
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    order_number,
+                    "pending",
+                    "pending",
+                    subtotal,
+                    0,
+                    subtotal,
+                ),
+            )
+
+            order_id = cursor.lastrowid
+
+            for item in validated_items:
+
+                design_json = json.dumps(
+                    {
+                        "persons": item["persons"],
+                        "name": item["name"],
+                        "style": item["style"],
+                        "size": item["size"],
+                    },
+                    ensure_ascii=False,
+                )
+
+                cursor.execute(
+                    """
+                    INSERT INTO order_items (
+                        order_id,
+                        item_number,
+                        size,
+                        style,
+                        poster_name,
+                        price_dkk,
+                        design_json
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        order_id,
+                        item["item_number"],
+                        item["size"],
+                        item["style"],
+                        item["name"],
+                        item["price"],
+                        design_json,
+                    ),
+                )
+
+        connection.commit()
+
+    except Exception:
+        if connection:
+            connection.rollback()
+
+        return JSONResponse(
+            {"error": "Bestillingen kunne ikke gemmes."},
+            status_code=500,
+        )
+
+    finally:
+        if connection:
+            connection.close()
+
+    # Opret Stripe Checkout efter at ordren er gemt
+    try:
         session = stripe.checkout.Session.create(
             mode="payment",
             line_items=line_items,
-        
+
+            client_reference_id=order_number,
+
+            metadata={
+                "order_id": str(order_id),
+                "order_number": order_number,
+            },
+
             billing_address_collection="required",
-        
+
             shipping_address_collection={
                 "allowed_countries": ["DK"]
             },
-        
+
             success_url=(
                 "https://avart.dk/?payment=success"
                 "&session_id={CHECKOUT_SESSION_ID}"
             ),
-        
-            cancel_url="https://avart.dk/?payment=cancel"
+
+            cancel_url="https://avart.dk/?payment=cancel",
+
+            expires_at=int(__import__("time").time()) + 1800,
         )
+
+        connection = get_db_connection()
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE orders
+                    SET stripe_session_id = %s
+                    WHERE id = %s
+                    """,
+                    (session.id, order_id),
+                )
+
+            connection.commit()
+
+        finally:
+            connection.close()
 
         return {
-            "url": session.url
+            "url": session.url,
+            "order_number": order_number,
         }
 
-    except Exception as e:
+    except Exception:
         return JSONResponse(
-            {"error": str(e)},
-            status_code=400
+            {
+                "error": "Betalingen kunne ikke oprettes. Prøv igen."
+            },
+            status_code=500,
         )
-
-
 
 @app.get("/checkout-session")
 async def get_checkout_session(session_id: str = Query(...)):
