@@ -3246,6 +3246,7 @@ async def stripe_webhook(request: Request):
         return {"received": True}
 
     session = event["data"]["object"]
+    session = session.to_dict()
 
     # En gennemført Checkout-session er ikke altid betalt endnu
     if session.get("payment_status") != "paid":
