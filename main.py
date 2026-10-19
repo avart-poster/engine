@@ -1547,10 +1547,10 @@ def generate_multi_poster_pdf(
     # ------------------------------------------------
 
     size_dimensions = {
-        "a3": (297, 420),
-        "a2": (420, 594),
+        "A3": (297, 420),
+        "A2": (420, 594),
         "50x70": (500, 700),
-        "a1": (594, 841),
+        "A1": (594, 841),
     }
 
     if size not in size_dimensions:
@@ -2576,10 +2576,10 @@ async def poster_render(
         )
 
         allowed_sizes = {
-            "a3",
-            "a2",
+            "A3",
+            "A2",
             "50x70",
-            "a1",
+            "A1",
         }
 
         if size not in allowed_sizes:
@@ -2977,10 +2977,10 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 async def create_checkout_session(data: dict):
 
     prices = {
-        "a3": 299,
-        "a2": 399,
+        "A3": 299,
+        "A2": 399,
         "50x70": 499,
-        "a1": 599,
+        "A1": 599,
     }
 
     allowed_styles = {
