@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
-from fastapi import FastAPI, File, UploadFile, Query
+from fastapi import FastAPI, File, UploadFile, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse, StreamingResponse
 from rembg import remove, new_session
@@ -3207,6 +3207,173 @@ async def create_checkout_session(data: dict):
             },
             status_code=500,
         )
+
+
+# --------------------------------------------------
+# STRIPE WEBHOOK – BETALINGSBEKRÆFTELSE
+# --------------------------------------------------
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+
+    if not signature or not webhook_secret:
+        return JSONResponse(
+            {"error": "Webhook-konfiguration mangler."},
+            status_code=400,
+        )
+
+    # Kontrollér, at beskeden faktisk kommer fra Stripe
+    try:
+        event = stripe.Webhook.construct_event(
+            payload,
+            signature,
+            webhook_secret,
+        )
+
+    except (ValueError, stripe.error.SignatureVerificationError):
+        return JSONResponse(
+            {"error": "Ugyldig Stripe-signatur."},
+            status_code=400,
+        )
+
+    # Vi behandler kun gennemførte Checkout-sessioner
+    if event["type"] != "checkout.session.completed":
+        return {"received": True}
+
+    session = event["data"]["object"]
+
+    # En gennemført Checkout-session er ikke altid betalt endnu
+    if session.get("payment_status") != "paid":
+        return {"received": True, "payment": "pending"}
+
+    order_number = session.get("client_reference_id")
+    session_id = session.get("id")
+
+    if not order_number or not session_id:
+        return JSONResponse(
+            {"error": "Ordreoplysninger mangler."},
+            status_code=400,
+        )
+
+    connection = None
+
+    try:
+        connection = get_db_connection()
+
+        with connection.cursor() as cursor:
+
+            # Find ordren og lås den under opdateringen
+            cursor.execute(
+                """
+                SELECT id, payment_status, total_dkk
+                FROM orders
+                WHERE order_number = %s
+                  AND stripe_session_id = %s
+                FOR UPDATE
+                """,
+                (order_number, session_id),
+            )
+
+            order = cursor.fetchone()
+
+            if not order:
+                connection.rollback()
+                return JSONResponse(
+                    {"error": "Ordren blev ikke fundet."},
+                    status_code=404,
+                )
+
+            # Kontrollér, at Stripe har modtaget det rigtige beløb
+            amount_total = session.get("amount_total")
+            currency = session.get("currency")
+
+            if (
+                amount_total != order["total_dkk"] * 100
+                or currency != "dkk"
+            ):
+                connection.rollback()
+                return JSONResponse(
+                    {"error": "Betalingsbeløbet stemmer ikke."},
+                    status_code=400,
+                )
+
+            # Undgå dobbeltbehandling af samme betaling
+            if order["payment_status"] == "paid":
+                connection.commit()
+                return {"received": True, "already_paid": True}
+
+            customer = session.get("customer_details") or {}
+            shipping = session.get("shipping_details") or {}
+            address = shipping.get("address") or {}
+
+            # Nyere Stripe-versioner kan have leveringsoplysninger
+            # under collected_information
+            collected = session.get("collected_information") or {}
+
+            if not shipping:
+                shipping = collected.get("shipping_details") or {}
+                address = shipping.get("address") or {}
+
+            cursor.execute(
+                """
+                UPDATE orders
+                SET
+                    payment_status = %s,
+                    order_status = %s,
+                    stripe_payment_intent_id = %s,
+                    customer_name = %s,
+                    customer_email = %s,
+                    customer_phone = %s,
+                    shipping_name = %s,
+                    shipping_address = %s,
+                    shipping_postal_code = %s,
+                    shipping_city = %s,
+                    shipping_country = %s,
+                    paid_at = NOW()
+                WHERE id = %s
+                """,
+                (
+                    "paid",
+                    "paid",
+                    session.get("payment_intent"),
+                    customer.get("name"),
+                    customer.get("email"),
+                    customer.get("phone"),
+                    shipping.get("name"),
+                    address.get("line1", "") + (
+                        ", " + address["line2"]
+                        if address.get("line2") else ""
+                    ),
+                    address.get("postal_code"),
+                    address.get("city"),
+                    address.get("country", "DK"),
+                    order["id"],
+                ),
+            )
+
+        connection.commit()
+
+    except Exception:
+        if connection:
+            connection.rollback()
+
+        # Stripe forsøger igen ved serverfejl
+        return JSONResponse(
+            {"error": "Ordren kunne ikke opdateres."},
+            status_code=500,
+        )
+
+    finally:
+        if connection:
+            connection.close()
+
+    return {"received": True, "payment": "paid"}
+
 
 @app.get("/checkout-session")
 async def get_checkout_session(session_id: str = Query(...)):
