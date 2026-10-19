@@ -3049,7 +3049,7 @@ async def create_checkout_session(data: dict):
                 "price_data": {
                     "currency": "dkk",
                     "product_data": {
-                        "name": f"AVART plakat – {size} – {style}"
+                        "name": f"AVART plakat – {size.upper() if size != '50x70' else '50×70'} – {style}"
                     },
                     "unit_amount": price * 100,
                 },
