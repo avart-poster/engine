@@ -26,6 +26,27 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.graphics import renderPDF
 
 from svglib.svglib import svg2rlg
+
+# --------------------------------------------------
+# AVART DATABASE CONNECTION
+# --------------------------------------------------
+
+def get_db_connection():
+    return pymysql.connect(
+        host=os.environ["DB_HOST"],
+        port=int(os.environ.get("DB_PORT", "3306")),
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        database=os.environ["DB_NAME"],
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        connect_timeout=10,
+        read_timeout=10,
+        write_timeout=10,
+        autocommit=False,
+    )
+
+
 register_heif_opener()
 
 pdfmetrics.registerFont(
