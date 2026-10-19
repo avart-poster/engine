@@ -2258,7 +2258,40 @@ def make_print_ready_pdf(pdf_bytes: bytes, bleed_mm: float = 3) -> bytes:
     finally:
         output.close()
         source.close()
-    
+
+@app.get("/test/print-pdf")
+def test_print_pdf():
+    from fastapi.responses import Response
+
+    # Enkel A3-test med farvet baggrund
+    from reportlab.pdfgen import canvas
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=(297 * mm, 420 * mm))
+
+    c.setFillColor(colors.CMYKColor(0, 25, 50, 50))
+    c.rect(0, 0, 297 * mm, 420 * mm, fill=1, stroke=0)
+
+    c.setFillColor(colors.CMYKColor(0, 0, 0, 100))
+    c.setFont("Helvetica", 24)
+    c.drawCentredString(148.5 * mm, 210 * mm, "AVART PRINT TEST")
+
+    c.save()
+
+    pdf_bytes = make_print_ready_pdf(buffer.getvalue())
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'inline; filename="AVART-print-test.pdf"'
+        },
+    )
+
+
+
 # --------------------------------------------------
 # API
 # --------------------------------------------------
