@@ -2145,7 +2145,119 @@ def generate_multi_poster_pdf(
             except Exception:
                 pass
 
+# --------------------------------------------------
+# AVART – PRINT PDF MED 3 MM BLEED OG SKÆREMÆRKER
+# --------------------------------------------------
 
+def make_print_ready_pdf(pdf_bytes: bytes, bleed_mm: float = 3) -> bytes:
+    """
+    Tilføjer 3 mm bleed, skæremærker og PDF-beskæringsbokse.
+    Bevarer den eksisterende PDF som vektorgrafik.
+    """
+    import fitz
+
+    source = fitz.open(stream=pdf_bytes, filetype="pdf")
+    output = fitz.open()
+
+    try:
+        bleed = bleed_mm * 72 / 25.4
+        mark_length = 5 * 72 / 25.4
+        mark_gap = 2 * 72 / 25.4
+
+        for source_page in source:
+            w = source_page.rect.width
+            h = source_page.rect.height
+
+            # Plads til bleed og skæremærker
+            margin = bleed + mark_gap + mark_length
+            page = output.new_page(
+                width=w + 2 * margin,
+                height=h + 2 * margin,
+            )
+
+            trim = fitz.Rect(
+                margin,
+                margin,
+                margin + w,
+                margin + h,
+            )
+
+            # Indsæt original PDF som vektorgrafik
+            page.show_pdf_page(trim, source, source_page.number)
+
+            # Udvid kantfarven til bleed-området.
+            # Dette udfylder bleed for plakater med farvet baggrund.
+            if source_page.get_drawings():
+                drawings = source_page.get_drawings()
+                background = next(
+                    (
+                        d.get("fill")
+                        for d in drawings
+                        if d.get("fill") is not None
+                        and d["rect"].width >= w - 1
+                        and d["rect"].height >= h - 1
+                    ),
+                    None,
+                )
+
+                if background is not None:
+                    bleed_rect = fitz.Rect(
+                        trim.x0 - bleed,
+                        trim.y0 - bleed,
+                        trim.x1 + bleed,
+                        trim.y1 + bleed,
+                    )
+                    page.draw_rect(
+                        bleed_rect,
+                        color=None,
+                        fill=background,
+                        overlay=False,
+                    )
+
+            # Skæremærker – placeret uden for bleed
+            x0, y0, x1, y1 = trim
+            gap = bleed + mark_gap
+            length = mark_length
+
+            marks = [
+                # Øverst venstre
+                ((x0, y0 - gap), (x0, y0 - gap - length)),
+                ((x0 - gap, y0), (x0 - gap - length, y0)),
+                # Øverst højre
+                ((x1, y0 - gap), (x1, y0 - gap - length)),
+                ((x1 + gap, y0), (x1 + gap + length, y0)),
+                # Nederst venstre
+                ((x0, y1 + gap), (x0, y1 + gap + length)),
+                ((x0 - gap, y1), (x0 - gap - length, y1)),
+                # Nederst højre
+                ((x1, y1 + gap), (x1, y1 + gap + length)),
+                ((x1 + gap, y1), (x1 + gap + length, y1)),
+            ]
+
+            for start, end in marks:
+                page.draw_line(
+                    fitz.Point(*start),
+                    fitz.Point(*end),
+                    color=(0, 0, 0),
+                    width=0.3,
+                )
+
+            # PDF-bokse
+            page.set_trimbox(trim)
+            page.set_bleedbox(
+                fitz.Rect(
+                    trim.x0 - bleed,
+                    trim.y0 - bleed,
+                    trim.x1 + bleed,
+                    trim.y1 + bleed,
+                )
+            )
+
+        return output.tobytes(garbage=4, deflate=True)
+
+    finally:
+        output.close()
+        source.close()
     
 # --------------------------------------------------
 # API
