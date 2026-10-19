@@ -3090,8 +3090,8 @@ async def create_checkout_session(data: dict):
                     "pending",
                     "pending",
                     subtotal,
-                    0,
-                    subtotal,
+                    49,
+                    subtotal + 49,
                 ),
             )
 
