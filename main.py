@@ -5,6 +5,7 @@ import stripe
 import pymysql
 import json
 import secrets
+import subprocess
 
 from typing import Annotated
 import pymupdf
@@ -2144,6 +2145,59 @@ def generate_multi_poster_pdf(
 
             except Exception:
                 pass
+
+# --------------------------------------------------
+# AVART – OVERFØR PRODUKTIONSFIL TIL CHOSTING
+# --------------------------------------------------
+
+def upload_production_pdf(pdf_bytes: bytes, filename: str):
+
+    import re
+
+    if not re.fullmatch(r"AVA-[A-F0-9]+_[0-9]+\.pdf", filename):
+        raise ValueError("Ugyldigt produktionsfilnavn.")
+
+    remote_host = "178.20.216.107"
+    remote_user = "avartdk"
+    remote_folder = "/home/avartdk/avart-orders"
+
+    ssh_key = "/etc/secrets/avart_render"
+
+    with tempfile.NamedTemporaryFile(
+        suffix=".pdf",
+        delete=False,
+    ) as temp_file:
+
+        temp_file.write(pdf_bytes)
+        temp_path = temp_file.name
+
+    try:
+
+        subprocess.run(
+            [
+                "scp",
+                "-4",
+                "-P", "222",
+                "-i", ssh_key,
+                "-o", "BatchMode=yes",
+                "-o", "StrictHostKeyChecking=yes",
+                "-o", "ConnectTimeout=15",
+                temp_path,
+                f"{remote_user}@{remote_host}:{remote_folder}/{filename}",
+            ],
+            check=True,
+            timeout=120,
+            capture_output=True,
+            text=True,
+        )
+
+        return f"{remote_folder}/{filename}"
+
+    finally:
+
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
 
 # --------------------------------------------------
 # AVART – PRINT PDF MED 3 MM BLEED OG SKÆREMÆRKER
