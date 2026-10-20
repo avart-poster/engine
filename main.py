@@ -553,30 +553,17 @@ def alpha_to_mask(
     alpha_threshold: int = 128,
     smooth: bool = True,
 ) -> np.ndarray:
+
     alpha = rgba[:, :, 3]
 
-    # Bevar rembg-maskens kant så præcist som muligt.
-    # Ingen blur eller morphology i denne fase.
+    # Bevar den oprindelige kontur.
+    # Ingen blur eller morphology.
     mask = np.where(
         alpha > alpha_threshold,
         255,
         0
     ).astype(np.uint8)
-    
-    # Fjern meget tynde udstikkende hår/pixelstøj.
-    # Ingen blur – vi bevarer selve profilens form.
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (5, 5),
-    )
-    
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_OPEN,
-        kernel,
-        iterations=1,
-    )
-    
+
     return mask
 
 
