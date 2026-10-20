@@ -3500,6 +3500,22 @@ def produce_order_pdfs(order_id: int):
                 print_pdf,
                 filename,
             )
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE order_items
+                    SET production_pdf_path = %s
+                    WHERE id = %s
+                      AND order_id = %s
+                    """,
+                    (
+                        remote_path,
+                        item["id"],
+                        order_id,
+                    ),
+                )
+            
+            connection.commit()
 
             print(
                 f"AVART PRODUCTION FILE: {remote_path}",
