@@ -3422,6 +3422,96 @@ async def create_checkout_session(data: dict):
 
 
 # --------------------------------------------------
+# AVART – PRODUKTIONSFILER TIL BETALTE ORDRER
+# --------------------------------------------------
+
+def produce_order_pdfs(order_id: int):
+    """
+    Genererer produktions-PDF'er for en betalt ordre
+    og overfører dem til cHosting.
+    """
+
+    connection = get_db_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT order_number, payment_status
+                FROM orders
+                WHERE id = %s
+                """,
+                (order_id,),
+            )
+
+            order = cursor.fetchone()
+
+            if not order:
+                raise ValueError("Ordren findes ikke.")
+
+            if order["payment_status"] != "paid":
+                raise ValueError("Ordren er ikke betalt.")
+
+            cursor.execute(
+                """
+                SELECT id, item_number, design_json
+                FROM order_items
+                WHERE order_id = %s
+                ORDER BY item_number
+                """,
+                (order_id,),
+            )
+
+            items = cursor.fetchall()
+
+        for item in items:
+
+            design = json.loads(item["design_json"])
+
+            persons = design["persons"]
+            name = design["name"]
+            style = design["style"]
+            size = design["size"]
+
+            orientation = (
+                "portrait"
+                if len(persons) <= 2
+                else "landscape"
+            )
+
+            pdf_bytes = generate_multi_poster_pdf(
+                persons=persons,
+                name=name,
+                stroke_width=DEFAULT_STROKE_WIDTH,
+                orientation=orientation,
+                style=style,
+                size=size,
+            )
+
+            print_pdf = make_print_ready_pdf(pdf_bytes)
+
+            filename = (
+                f"{order['order_number']}_"
+                f"{item['item_number']}.pdf"
+            )
+
+            remote_path = upload_production_pdf(
+                print_pdf,
+                filename,
+            )
+
+            print(
+                f"AVART PRODUCTION FILE: {remote_path}",
+                flush=True,
+            )
+
+    finally:
+        connection.close()
+
+
+
+# --------------------------------------------------
 # STRIPE WEBHOOK – BETALINGSBEKRÆFTELSE
 # --------------------------------------------------
 
