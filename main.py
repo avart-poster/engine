@@ -2161,7 +2161,7 @@ def upload_production_pdf(pdf_bytes: bytes, filename: str):
     remote_user = "avartdk"
     remote_folder = "/home/avartdk/avart-orders"
 
-    ssh_key = "/etc/secrets/avart_render"
+    ssh_key = "/etc/secrets/avart_render_new"
 
     with tempfile.NamedTemporaryFile(
         suffix=".pdf",
