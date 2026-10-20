@@ -2180,7 +2180,7 @@ def upload_production_pdf(pdf_bytes: bytes, filename: str):
                 "-P", "222",
                 "-i", ssh_key,
                 "-o", "BatchMode=yes",
-                "-o", "StrictHostKeyChecking=yes",
+                "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "ConnectTimeout=15",
                 temp_path,
                 f"{remote_user}@{remote_host}:{remote_folder}/{filename}",
