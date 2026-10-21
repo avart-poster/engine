@@ -1748,6 +1748,24 @@ def generate_multi_poster_pdf(
         for level, position in reference_top_positions_mm.items()
     }
 
+    # ------------------------------------------------
+    # MAKSIMAL HØJDE – AVART DESIGNGUIDE
+    # ------------------------------------------------
+    
+    size_top_limits_mm = {
+        "A3": 65,
+        "A2": 100,
+        "50x70": 115,
+        "A1": 140,
+    }
+    
+    minimum_top_mm = size_top_limits_mm[size]
+    
+    top_positions_mm = {
+        level: max(position, minimum_top_mm)
+        for level, position in top_positions_mm.items()
+    }
+
 
     # ------------------------------------------------
     # ANTAL PERSONER
@@ -1804,9 +1822,10 @@ def generate_multi_poster_pdf(
                 "Landscape supports 3 to 6 persons"
             )
 
-        side_margin = (
-            side_margins_mm[count] * mm
-        )
+        side_margin = max(
+            side_margins_mm[count],
+            size_side_margins_mm[size],
+        ) * mm
 
         # Fordel personernes centre jævnt mellem
         # venstre og højre designmargin.
@@ -2010,13 +2029,16 @@ def generate_multi_poster_pdf(
             
                 drawing.scale(
                     width_scale,
-                    1.0,
+                    width_scale,
                 )
             
                 set_stroke_width_recursive(
                     drawing,
-                    stroke_width / silhouette_scale,
+                    stroke_width / (silhouette_scale * width_scale),
                 )
+
+                min_x, min_y, max_x, max_y = drawing.getBounds()
+                draw_w = max_x - min_x
 
 
             # --------------------------------------------
