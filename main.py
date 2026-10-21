@@ -591,7 +591,9 @@ def get_smoothed_outer_contour(
         contours,
         key=cv2.contourArea,
     )
+    
 
+    
     # --------------------------------------------------
     # BEVAR ALLE KONTURPUNKTER
     # --------------------------------------------------
