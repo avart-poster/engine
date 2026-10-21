@@ -2102,7 +2102,7 @@ def generate_multi_poster_pdf(
             # SIKKERHED MOD BESKÅRING I SIDERNE
             # --------------------------------------------
 
-            side_margin_safety = 10 * mm
+            side_margin_safety = size_side_margins_mm[size] * mm
 
             left_edge = x + min_x
             right_edge = x + max_x
