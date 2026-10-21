@@ -3599,6 +3599,39 @@ def send_order_email(to_email, subject, body, attachments=None):
         )
         smtp.send_message(message)
 
+def download_production_pdf(remote_path):
+    """Henter en færdig produktions-PDF fra cHosting."""
+
+    import re
+
+    filename = os.path.basename(remote_path)
+
+    if not re.fullmatch(r"AVA-[A-F0-9]+_[0-9]+\.pdf", filename):
+        raise ValueError("Ugyldigt produktionsfilnavn.")
+
+    expected_path = f"/home/avartdk/avart-orders/{filename}"
+
+    if remote_path != expected_path:
+        raise ValueError("Ugyldig produktionsfilsti.")
+
+    result = subprocess.run(
+        [
+            "ssh",
+            "-p", "222",
+            "-i", "/etc/secrets/avart_render_new",
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "avartdk@178.20.216.107",
+            "cat",
+            expected_path,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+
+    return filename, result.stdout
+
 
 # --------------------------------------------------
 # AVART – PRODUKTIONSFILER TIL BETALTE ORDRER
