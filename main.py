@@ -1648,6 +1648,17 @@ def generate_multi_poster_pdf(
         "A1": (594, 841),
     }
 
+    # ------------------------------------------------
+    # AVART DESIGNMARGINER
+    # ------------------------------------------------
+    
+    size_side_margins_mm = {
+        "A3": 30,
+        "A2": 45,
+        "50x70": 50,
+        "A1": 65,
+    }
+
     if size not in size_dimensions:
         raise ValueError(
             f"Unknown poster size: {size}"
@@ -3518,7 +3529,7 @@ async def create_checkout_session(data: dict):
             status_code=500,
         )
 
-def send_order_email(to_email, subject, body):
+def send_order_email(to_email, subject, body, attachments=None):
     """Sender en e-mail fra AVARTs ordremail."""
 
     message = EmailMessage()
@@ -3526,6 +3537,14 @@ def send_order_email(to_email, subject, body):
     message["To"] = to_email
     message["Subject"] = subject
     message.set_content(body)
+
+    for filename, pdf_bytes in (attachments or []):
+        message.add_attachment(
+            pdf_bytes,
+            maintype="application",
+            subtype="pdf",
+            filename=filename
+        )
 
     with smtplib.SMTP_SSL(
         os.environ["SMTP_HOST"],
