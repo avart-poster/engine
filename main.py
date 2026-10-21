@@ -3518,6 +3518,26 @@ async def create_checkout_session(data: dict):
             status_code=500,
         )
 
+def send_order_email(to_email, subject, body):
+    """Sender en e-mail fra AVARTs ordremail."""
+
+    message = EmailMessage()
+    message["From"] = os.environ["SMTP_USER"]
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+
+    with smtplib.SMTP_SSL(
+        os.environ["SMTP_HOST"],
+        int(os.environ["SMTP_PORT"]),
+        timeout=30
+    ) as smtp:
+        smtp.login(
+            os.environ["SMTP_USER"],
+            os.environ["SMTP_PASSWORD"]
+        )
+        smtp.send_message(message)
+
 
 # --------------------------------------------------
 # AVART – PRODUKTIONSFILER TIL BETALTE ORDRER
