@@ -435,6 +435,35 @@ def remove_background_if_needed(
     # REMBG – ORIGINALBILLEDET
     # --------------------------------------------------
 
+    # --------------------------------------------------
+    # AUTOMATISK KONTRASTFORBEDRING FØR REMBG
+    # --------------------------------------------------
+    
+    # Forbedr kontrasten uden at ændre originalfilen.
+    # CLAHE arbejder på lysstyrken og bevarer farverne.
+    
+    lab = cv2.cvtColor(
+        img,
+        cv2.COLOR_BGR2LAB,
+    )
+    
+    l_channel, a_channel, b_channel = cv2.split(lab)
+    
+    clahe = cv2.createCLAHE(
+        clipLimit=1.5,
+        tileGridSize=(8, 8),
+    )
+    
+    l_channel = clahe.apply(l_channel)
+    
+    lab = cv2.merge(
+        (l_channel, a_channel, b_channel)
+    )
+    
+    img = cv2.cvtColor(
+        lab,
+        cv2.COLOR_LAB2BGR,
+    )
     ok, buffer = cv2.imencode(
         ".png",
         img,
