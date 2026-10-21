@@ -628,10 +628,11 @@ def get_smoothed_outer_contour(
     
         # Meget mild smoothing omkring ansigtet.
         # Bevarer flere detaljer i næse, læber og hage.
+        
         face_window = 5
     
         # Resten af silhuetten glattes kraftigere.
-        body_window = min(31, smooth_window + 12)
+        body_window = 31
     
         if body_window % 2 == 0:
             body_window += 1
@@ -1083,6 +1084,9 @@ def contour_to_svg(
     # --------------------------------------------------
 
     extra_paths = []
+
+    # Kun hovedkonturen skal tegnes
+    mask = None
 
     if mask is not None:
 
@@ -3693,6 +3697,18 @@ async def stripe_webhook(request: Request):
     finally:
         if connection:
             connection.close()
+            
+    try:
+        produce_order_pdfs(int(order["id"]))
+    except Exception as e:
+        print(
+            f"AVART PDF PRODUCTION ERROR: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        return JSONResponse(
+            {"error": "PDF-produktionen mislykkedes."},
+            status_code=500,
+        )
 
     return {"received": True, "payment": "paid"}
 
