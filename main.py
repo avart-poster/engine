@@ -1104,19 +1104,42 @@ def contour_to_svg(
         )
 
     # --------------------------------------------------
-    # HOVEDKONTUR → SVG PATH
+    # HOVEDKONTUR → SVG PATH. Brug bløde kurver i stedet for lige linjestykker.
     # --------------------------------------------------
-
+   
+    pts = contour[:, 0, :].astype(np.float64)
+    
+    if len(pts) < 3:
+        raise ValueError("Contour too small")
+    
     d = [
         f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"
     ]
-
-    for p in pts[1:]:
-
+    mid_x = (pts[0][0] + pts[1][0]) / 2
+    mid_y = (pts[0][1] + pts[1][1]) / 2
+    
+    d.append(
+        f"L {mid_x:.2f} {mid_y:.2f}"
+    )
+    for i in range(1, len(pts) - 1):
+    
+        p0 = pts[i - 1]
+        p1 = pts[i]
+        p2 = pts[i + 1]
+    
+        # Midtpunkt mellem dette og næste konturpunkt
+        mid_x = (p1[0] + p2[0]) / 2
+        mid_y = (p1[1] + p2[1]) / 2
+    
         d.append(
-            f"L {p[0]:.2f} {p[1]:.2f}"
+            f"Q {p1[0]:.2f} {p1[1]:.2f} "
+            f"{mid_x:.2f} {mid_y:.2f}"
         )
-
+    
+    d.append(
+        f"L {pts[-1][0]:.2f} {pts[-1][1]:.2f}"
+    )
+    
     main_path = " ".join(d)
 
     # --------------------------------------------------
