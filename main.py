@@ -6,6 +6,8 @@ import pymysql
 import json
 import secrets
 import subprocess
+import smtplib
+from email.message import EmailMessage
 
 from typing import Annotated
 import pymupdf
