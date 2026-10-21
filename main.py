@@ -452,7 +452,7 @@ def remove_background_if_needed(
     l_channel, a_channel, b_channel = cv2.split(lab)
     
     clahe = cv2.createCLAHE(
-        clipLimit=2.5,
+        clipLimit=1.0,
         tileGridSize=(8, 8),
     )
     
