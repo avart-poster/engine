@@ -3437,9 +3437,13 @@ async def create_checkout_session(data: dict):
             },
 
             billing_address_collection="required",
-
+            
             shipping_address_collection={
                 "allowed_countries": ["DK"]
+            },
+            
+            phone_number_collection={
+                "enabled": True
             },
 
             success_url=(
