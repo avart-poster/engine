@@ -591,6 +591,44 @@ def get_smoothed_outer_contour(
         contours,
         key=cv2.contourArea,
     )
+
+    # Fjern små løkker og udstikkere med en forsigtig
+    # morfologisk åbning, men beskyt ansigtet.
+    
+    if face_region is not None:
+        fx, fy, fw, fh = face_region
+    
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (3, 3),
+        )
+    
+        cleaned_mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_OPEN,
+            kernel,
+            iterations=1,
+        )
+    
+        # Bevar original maske omkring ansigtet.
+        x1 = max(0, int(fx - fw * 0.5))
+        y1 = max(0, int(fy - fh * 0.5))
+        x2 = min(mask.shape[1], int(fx + fw * 1.5))
+        y2 = min(mask.shape[0], int(fy + fh * 1.5))
+    
+        cleaned_mask[y1:y2, x1:x2] = mask[y1:y2, x1:x2]
+    
+        cleaned_contours, _ = cv2.findContours(
+            cleaned_mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_NONE,
+        )
+    
+        if cleaned_contours:
+            largest = max(
+                cleaned_contours,
+                key=cv2.contourArea,
+            )
     
 
     
