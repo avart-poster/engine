@@ -578,7 +578,6 @@ def remove_background_if_needed(
 
     return rgba
 
-
 def alpha_to_mask(
     rgba: np.ndarray,
     alpha_threshold: int = 128,
@@ -587,13 +586,28 @@ def alpha_to_mask(
 
     alpha = rgba[:, :, 3]
 
-    # Bevar den oprindelige kontur.
-    # Ingen blur eller morphology.
     mask = np.where(
         alpha > alpha_threshold,
         255,
         0
     ).astype(np.uint8)
+
+    # Udfyld små huller i tøjet, som skyldes
+    # at baggrundsfjernelsen har fjernet dele
+    # af blusens mønster.
+
+    if smooth:
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (7, 7),
+        )
+
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=1,
+        )
 
     return mask
 
