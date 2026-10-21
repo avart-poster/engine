@@ -723,10 +723,19 @@ def get_secondary_outer_contours(
 
     secondary = []
 
-    for contour in contours:
+    # Find hovedkonturen fra den oprindelige maske.
+    # Den udglattede hovedkontur har andre koordinater
+    # og kan derfor ikke sammenlignes med np.array_equal.
 
-        # Spring selve hovedkonturen over
-        if np.array_equal(contour, main_contour):
+    main_index = max(
+        range(len(contours)),
+        key=lambda i: cv2.contourArea(contours[i]),
+    )
+
+    for index, contour in enumerate(contours):
+
+        # Spring hovedkonturen over
+        if index == main_index:
             continue
 
         area = cv2.contourArea(contour)
@@ -3442,7 +3451,7 @@ def produce_order_pdfs(order_id: int):
 
             cursor.execute(
                 """
-                SELECT id, item_number, design_json
+                SELECT id, item_number, design_json, production_pdf_path
                 FROM order_items
                 WHERE order_id = %s
                 ORDER BY item_number
@@ -3453,6 +3462,13 @@ def produce_order_pdfs(order_id: int):
             items = cursor.fetchall()
 
         for item in items:
+
+            if item["production_pdf_path"]:
+                print(
+                    f"AVART: PDF findes allerede for plakat {item['item_number']}",
+                    flush=True,
+                )
+                continue
 
             design = json.loads(item["design_json"])
 
