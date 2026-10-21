@@ -1998,6 +1998,26 @@ def generate_multi_poster_pdf(
 
             draw_w = max_x - min_x
 
+            # ------------------------------------------------
+            # BEGRÆNS SILHUETTENS BREDDE TIL DESIGNMARGINERNE
+            # ------------------------------------------------
+            
+            minimum_side_margin = size_side_margins_mm[size] * mm
+            maximum_width = width - (2 * minimum_side_margin)
+            
+            if draw_w > maximum_width:
+                width_scale = maximum_width / draw_w
+            
+                drawing.scale(
+                    width_scale,
+                    1.0,
+                )
+            
+                set_stroke_width_recursive(
+                    drawing,
+                    stroke_width / silhouette_scale,
+                )
+
 
             # --------------------------------------------
             # VANDRET PLACERING
