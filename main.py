@@ -572,17 +572,34 @@ def alpha_to_mask(
     # af blusens mønster.
 
     if smooth:
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE,
-            (7, 7),
-        )
 
-        mask = cv2.morphologyEx(
-            mask,
-            cv2.MORPH_CLOSE,
-            kernel,
-            iterations=1,
-        )
+    # Luk indvendige huller i personen.
+    # Bevar den oprindelige yderkontur.
+
+    contours, hierarchy = cv2.findContours(
+        mask.copy(),
+        cv2.RETR_CCOMP,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+
+    if hierarchy is not None:
+
+        filled_mask = mask.copy()
+
+        for i, contour in enumerate(contours):
+
+            # Kun indvendige huller
+            if hierarchy[0][i][3] != -1:
+
+                cv2.drawContours(
+                    filled_mask,
+                    contours,
+                    i,
+                    255,
+                    thickness=cv2.FILLED,
+                )
+
+        mask = filled_mask
 
     return mask
 
@@ -1607,11 +1624,11 @@ def generate_multi_poster_pdf(
 
     style_colors = {
         "light": None,
-        "dark": colors.CMYKColor(0, 0, 0, 100),
-        "moss": colors.CMYKColor(100, 50, 100, 50),
-        "wine": colors.CMYKColor(50, 75, 75, 50),
-        "camel": colors.CMYKColor(0, 25, 50, 50),
-        "sea": colors.CMYKColor(100, 50, 25, 50),
+        "dark": colors.CMYKColor(0, 0, 0, 1),
+        "moss": colors.CMYKColor(1, 0.5, 1, 0.5),
+        "wine": colors.CMYKColor(0.5, 0.75, 0.75, 0.5),
+        "camel": colors.CMYKColor(0, 0.25, 0.5, 0.5),
+        "sea": colors.CMYKColor(1, 0.5, 0.25, 0.5),
     }
 
     if style not in style_colors:
