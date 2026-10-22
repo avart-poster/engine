@@ -573,33 +573,33 @@ def alpha_to_mask(
 
     if smooth:
 
-    # Luk indvendige huller i personen.
-    # Bevar den oprindelige yderkontur.
+        # Luk indvendige huller i personen.
+        # Bevar den oprindelige yderkontur.
 
-    contours, hierarchy = cv2.findContours(
-        mask.copy(),
-        cv2.RETR_CCOMP,
-        cv2.CHAIN_APPROX_SIMPLE,
-    )
+        contours, hierarchy = cv2.findContours(
+            mask.copy(),
+            cv2.RETR_CCOMP,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
 
-    if hierarchy is not None:
+        if hierarchy is not None:
 
-        filled_mask = mask.copy()
+            filled_mask = mask.copy()
 
-        for i, contour in enumerate(contours):
+            for i, contour in enumerate(contours):
 
-            # Kun indvendige huller
-            if hierarchy[0][i][3] != -1:
+                # Kun indvendige huller
+                if hierarchy[0][i][3] != -1:
 
-                cv2.drawContours(
-                    filled_mask,
-                    contours,
-                    i,
-                    255,
-                    thickness=cv2.FILLED,
-                )
+                    cv2.drawContours(
+                        filled_mask,
+                        contours,
+                        i,
+                        255,
+                        thickness=cv2.FILLED,
+                    )
 
-        mask = filled_mask
+            mask = filled_mask
 
     return mask
 
