@@ -441,31 +441,6 @@ def remove_background_if_needed(
     # AUTOMATISK KONTRASTFORBEDRING FØR REMBG
     # --------------------------------------------------
     
-    # Forbedr kontrasten uden at ændre originalfilen.
-    # CLAHE arbejder på lysstyrken og bevarer farverne.
-    
-    lab = cv2.cvtColor(
-        img,
-        cv2.COLOR_BGR2LAB,
-    )
-    
-    l_channel, a_channel, b_channel = cv2.split(lab)
-    
-    clahe = cv2.createCLAHE(
-        clipLimit=1.0,
-        tileGridSize=(8, 8),
-    )
-    
-    l_channel = clahe.apply(l_channel)
-    
-    lab = cv2.merge(
-        (l_channel, a_channel, b_channel)
-    )
-    
-    img = cv2.cvtColor(
-        lab,
-        cv2.COLOR_LAB2BGR,
-    )
     ok, buffer = cv2.imencode(
         ".png",
         img,
@@ -3645,6 +3620,109 @@ def download_production_pdf(remote_path):
     )
 
     return filename, result.stdout
+
+def send_production_email(order_id):
+    """Sender produktionsfiler og leveringsoplysninger til trykkeriet."""
+
+    connection = get_db_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT *
+                FROM orders
+                WHERE id = %s
+                """,
+                (order_id,),
+            )
+            order = cursor.fetchone()
+
+            if not order:
+                raise ValueError("Ordren findes ikke.")
+
+            if order["payment_status"] != "paid":
+                raise ValueError("Ordren er ikke betalt.")
+
+            if order["production_email_sent_at"]:
+                return
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM order_items
+                WHERE order_id = %s
+                ORDER BY id
+                """,
+                (order_id,),
+            )
+            items = cursor.fetchall()
+
+        if not items:
+            raise ValueError("Ordren indeholder ingen plakater.")
+
+        attachments = []
+        poster_lines = []
+
+        for index, item in enumerate(items, start=1):
+            if not item["production_pdf_path"]:
+                raise ValueError("En produktions-PDF mangler.")
+
+            filename, pdf_bytes = download_production_pdf(
+                item["production_pdf_path"]
+            )
+
+            attachments.append((filename, pdf_bytes))
+
+            poster_lines.append(
+                f"Plakat {index}: "
+                f"{item.get('size') or 'Ukendt størrelse'} / "
+                f"{item.get('style') or 'Ukendt stil'}"
+            )
+
+        body = f"""NY PRODUKTIONSORDRE – AVART
+
+Ordrenummer: {order['order_number']}
+
+LEVERINGSOPLYSNINGER
+Navn: {order.get('shipping_name') or order.get('customer_name') or ''}
+Adresse: {order.get('shipping_address') or ''}
+Postnummer: {order.get('shipping_postal_code') or ''}
+By: {order.get('shipping_city') or ''}
+Land: {order.get('shipping_country') or 'DK'}
+
+KONTAKT
+E-mail: {order.get('customer_email') or ''}
+Telefon: {order.get('customer_phone') or ''}
+
+PLAKATER
+{chr(10).join(poster_lines)}
+
+De trykklare PDF-filer er vedhæftet.
+"""
+
+        send_order_email(
+            os.environ["PRODUCTION_EMAIL"],
+            f"AVART – Produktionsordre {order['order_number']}",
+            body,
+            attachments,
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE orders
+                SET production_email_sent_at = NOW()
+                WHERE id = %s
+                  AND production_email_sent_at IS NULL
+                """,
+                (order_id,),
+            )
+
+        connection.commit()
+
+    finally:
+        connection.close()
 
 
 # --------------------------------------------------
