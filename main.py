@@ -8,6 +8,11 @@ import secrets
 import subprocess
 import smtplib
 from email.message import EmailMessage
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from html import escape as html_escape
+from urllib.request import urlopen
+from urllib.parse import quote
 
 from typing import Annotated
 import pymupdf
@@ -3614,6 +3619,186 @@ def send_order_email(to_email, subject, body, attachments=None):
         )
         smtp.send_message(message)
 
+# --------------------------------------------------
+# AVART – KUNDEORDREBEKRÆFTELSE (HTML + VILKÅR)
+# --------------------------------------------------
+
+AVART_TERMS_PDF_URL = "https://avart.dk/docs/AVART-Handelsbetingelser.pdf"
+AVART_TIMEZONE = ZoneInfo("Europe/Copenhagen")
+
+
+def avart_money(amount):
+    return f"{float(amount):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def avart_schedule(paid_at):
+    """Ordrer senest mandag medtages i den kommende tirsdagsproduktion."""
+    if paid_at is None:
+        paid_at = datetime.now(AVART_TIMEZONE)
+    elif paid_at.tzinfo is None:
+        # Forudsætter at DB-sessionens tidszone er Europe/Copenhagen.
+        paid_at = paid_at.replace(tzinfo=AVART_TIMEZONE)
+    else:
+        paid_at = paid_at.astimezone(AVART_TIMEZONE)
+    days_until_tuesday = (1 - paid_at.weekday()) % 7
+    if days_until_tuesday == 0:
+        days_until_tuesday = 7
+    production = (paid_at + timedelta(days=days_until_tuesday)).date()
+    shipping = production + timedelta(days=1)
+    months = ["", "januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"]
+    return (f"Tirsdag den {production.day}. {months[production.month]}",
+            f"Onsdag den {shipping.day}. {months[shipping.month]}")
+
+
+def avart_download_terms_pdf():
+    with urlopen(AVART_TERMS_PDF_URL, timeout=20) as response:
+        data = response.read(5_000_001)
+    if len(data) > 5_000_000 or not data.startswith(b"%PDF-"):
+        raise ValueError("Handelsbetingelserne er ikke en gyldig PDF under 5 MB")
+    return data
+
+
+def avart_poster_preview(items):
+    """Brug den faktiske produktions-PDF, ikke en standardplakat."""
+    first = items[0]
+    if not first.get("production_pdf_path"):
+        raise ValueError("Produktionsfil mangler til kundens plakatpreview")
+    _, pdf_bytes = download_production_pdf(first["production_pdf_path"])
+    document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        pixmap = document[0].get_pixmap(matrix=pymupdf.Matrix(0.6, 0.6), alpha=False)
+        return pixmap.tobytes("png")
+    finally:
+        document.close()
+
+
+def avart_customer_email_html(order, items):
+    template_path = os.path.join(os.path.dirname(__file__), "email_templates", "ordrebekraeftelse.html")
+    with open(template_path, encoding="utf-8") as file:
+        template = file.read()
+    paid_at = order.get("paid_at")
+    prod_date, ship_date = avart_schedule(paid_at)
+    if isinstance(paid_at, datetime):
+        date_value = paid_at.astimezone(AVART_TIMEZONE) if paid_at.tzinfo else paid_at
+        months = ["", "januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"]
+        order_date = f"{date_value.day}. {months[date_value.month]} {date_value.year} kl. {date_value:%H.%M}"
+    else:
+        order_date = ""
+    rows = []
+    for item in items:
+        size = {"50x70": "500×700 mm", "A3": "297×420 mm", "A2": "420×594 mm", "A1": "594×841 mm"}.get(item["size"], item["size"])
+        rows.append('<tr><td style="padding:21px 0 18px">{}</td><td style="padding:21px 0 18px">{}</td><td style="padding:21px 0 18px">1 stk.</td><td align="right" style="padding:21px 0 18px">{}</td></tr>'.format(
+            html_escape(str(item["style"]).upper()), html_escape(size), avart_money(item["price_dkk"])))
+    address = ", ".join(filter(None, [order.get("shipping_address"),
+                 " ".join(filter(None, [str(order.get("shipping_postal_code") or ""), order.get("shipping_city") or ""]))]))
+    total = float(order["total_dkk"])
+    substitutions = {
+        "PRODUCTION_DATE": prod_date, "SHIPPING_DATE": ship_date,
+        "ORDER_NUMBER": order["order_number"], "ORDER_DATE": order_date,
+        "ITEM_ROWS": "".join(rows), "SHIPPING_PRICE": avart_money(order["shipping_dkk"]),
+        "TOTAL_PRICE": avart_money(total), "VAT_AMOUNT": avart_money(total / 5),
+        "SHIPPING_NAME": order.get("shipping_name") or order.get("customer_name") or "",
+        "SHIPPING_ADDRESS": address,
+    }
+    for key, value in substitutions.items():
+        template = template.replace("{{" + key + "}}", value if key == "ITEM_ROWS" else html_escape(str(value)))
+    # Encode the subject in the mailto URL, including the current order number.
+    template = template.replace("subject=Sp%C3%B8rgsm%C3%A5l%20til%20ordre%20" + html_escape(order["order_number"]),
+        "subject=" + quote("Spørgsmål til ordre " + order["order_number"]))
+    return template
+
+
+def send_customer_confirmation(order_id):
+    """Send kundemail med DB-lås, så samtidige webhook-kald ikke sender dubletter.
+
+    SMTP og database er ikke én transaktion. Ved en usikker SMTP/DB-fejl
+    kræves manuel kontrol af afsendelsen før et nyt forsøg.
+    """
+    connection = get_db_connection()
+    lock_name = f"avart_customer_email_{int(order_id)}"
+    lock_acquired = False
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, 10) AS acquired", (lock_name,))
+            lock_acquired = cursor.fetchone()["acquired"] == 1
+            if not lock_acquired:
+                raise RuntimeError("Kundemail behandles allerede af et andet kald")
+
+            cursor.execute("SELECT * FROM orders WHERE id=%s", (order_id,))
+            order = cursor.fetchone()
+            if not order or order["payment_status"] != "paid":
+                raise ValueError("Kun betalte ordrer kan bekræftes")
+            if order.get("customer_email_sent_at"):
+                return
+            if not order.get("customer_email"):
+                raise ValueError("Kundens e-mail mangler")
+            cursor.execute(
+                "SELECT * FROM order_items WHERE order_id=%s ORDER BY item_number",
+                (order_id,),
+            )
+            items = cursor.fetchall()
+
+        if not items:
+            raise ValueError("Ordren har ingen produkter")
+
+        html = avart_customer_email_html(order, items)
+        terms = avart_download_terms_pdf()
+        preview = avart_poster_preview(items)
+        logo_path = os.path.join(
+            os.path.dirname(__file__), "email_templates", "avart-logo.png"
+        )
+        with open(logo_path, "rb") as file:
+            logo = file.read()
+
+        message = EmailMessage()
+        message["From"] = os.environ["SMTP_USER"]
+        message["To"] = order["customer_email"]
+        message["Subject"] = f"AVART – Ordrebekræftelse {order['order_number']}"
+        message.set_content(
+            f"Tak for din bestilling hos AVART. Ordrenummer: "
+            f"{order['order_number']}. Handelsbetingelser er vedhæftet."
+        )
+        message.add_alternative(html, subtype="html")
+        html_part = message.get_payload()[-1]
+        html_part.add_related(
+            logo, maintype="image", subtype="png", cid="<avart_logo>",
+            filename="avart-logo.png",
+        )
+        html_part.add_related(
+            preview, maintype="image", subtype="png", cid="<avart_preview>",
+            filename="plakat-preview.png",
+        )
+        message.add_attachment(
+            terms, maintype="application", subtype="pdf",
+            filename="AVART-Handelsbetingelser.pdf",
+        )
+
+        with smtplib.SMTP_SSL(
+            os.environ["SMTP_HOST"], int(os.environ["SMTP_PORT"]), timeout=30
+        ) as smtp:
+            smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+            smtp.send_message(message)
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET customer_email_sent_at=NOW() "
+                "WHERE id=%s AND customer_email_sent_at IS NULL",
+                (order_id,),
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        if lock_acquired:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+            except Exception as error:
+                print(f"AVART EMAIL LOCK RELEASE ERROR: {error}", flush=True)
+        connection.close()
+
+
 def download_production_pdf(remote_path):
     """Henter en færdig produktions-PDF fra cHosting."""
 
@@ -3958,10 +4143,8 @@ async def stripe_webhook(request: Request):
                     status_code=400,
                 )
 
-            # Undgå dobbeltbehandling af samme betaling
-            if order["payment_status"] == "paid":
-                connection.commit()
-                return {"received": True, "already_paid": True}
+            # Bevar idempotent betalingsopdatering, men tillad genforsøg på kundemail.
+            already_paid = order["payment_status"] == "paid"
 
             customer = session.get("customer_details") or {}
             shipping = session.get("shipping_details") or {}
@@ -3975,8 +4158,9 @@ async def stripe_webhook(request: Request):
                 shipping = collected.get("shipping_details") or {}
                 address = shipping.get("address") or {}
 
-            cursor.execute(
-                """
+            if not already_paid:
+                cursor.execute(
+                    """
                 UPDATE orders
                 SET
                     payment_status = %s,
@@ -4039,6 +4223,19 @@ async def stripe_webhook(request: Request):
             {"error": "PDF-produktionen mislykkedes."},
             status_code=500,
         )
+
+    try:
+        send_customer_confirmation(int(order["id"]))
+    except Exception as e:
+        # Betalingen er allerede registreret. Stripe-retries må ikke
+        # automatisk gensende en mail med usikker SMTP-status.
+        # Undersøg log og kundemail før et eventuelt manuelt genforsøg.
+        print(
+            f"AVART CUSTOMER EMAIL NEEDS REVIEW: order_id={order['id']} "
+            f"{type(e).__name__}: {e}",
+            flush=True,
+        )
+        return {"received": True, "payment": "paid", "customer_email": "needs_review"}
 
     return {"received": True, "payment": "paid"}
 
