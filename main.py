@@ -1639,11 +1639,11 @@ def generate_multi_poster_pdf(
 
     style_colors = {
         "light": None,
-        "dark": colors.CMYKColor(0, 0, 0, 1),
-        "moss": colors.CMYKColor(1, 0.5, 1, 0.5),
-        "wine": colors.CMYKColor(0.5, 0.75, 0.75, 0.5),
-        "camel": colors.CMYKColor(0, 0.25, 0.5, 0.5),
-        "sea": colors.CMYKColor(1, 0.5, 0.25, 0.5),
+        "dark": colors.CMYKColor(0.2, 0.2, 0.2, 1),
+        "moss": colors.CMYKColor(0.25, 0, 0.50, 0.75),
+        "wine": colors.CMYKColor(0.50, 0.75, 0.75, 0.50),
+        "camel": colors.CMYKColor(0, 0.25, 0.50, 0.50),
+        "sea": colors.CMYKColor(0.75, 0.25, 0.25, 0.65),
     }
 
     if style not in style_colors:
@@ -1653,7 +1653,7 @@ def generate_multi_poster_pdf(
 
     # CMYK til tekst, silhuet og logo
     if style == "light":
-        fg_color = colors.CMYKColor(0, 0, 0, 100)
+        fg_color = colors.CMYKColor(0, 0, 0, 1)
     else:
         fg_color = colors.CMYKColor(0, 0, 0, 0)
     
