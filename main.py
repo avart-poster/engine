@@ -57,6 +57,7 @@ def get_db_connection():
     )
 
 
+
 register_heif_opener()
 
 pdfmetrics.registerFont(
