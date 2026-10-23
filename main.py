@@ -4224,6 +4224,20 @@ async def stripe_webhook(request: Request):
             status_code=500,
         )
 
+
+    try:
+        send_production_email(int(order["id"]))
+        print(
+            f"AVART PRODUCTION EMAIL SENT: order_id={order['id']}",
+            flush=True,
+        )
+    except Exception as e:
+        print(
+            f"AVART PRODUCTION EMAIL ERROR: {type(e).__name__}: {e}",
+            flush=True,
+        )   
+
+    
     try:
         send_customer_confirmation(int(order["id"]))
     except Exception as e:
