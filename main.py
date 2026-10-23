@@ -3370,7 +3370,7 @@ async def create_checkout_session(data: dict):
     try:
         for index, item in enumerate(items, start=1):
 
-            size = item["size"]
+            size = item["size"].upper()
             style = item["style"]
             name = item.get("name", "")
             persons = item["persons"]
