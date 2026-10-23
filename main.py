@@ -640,8 +640,17 @@ def get_smoothed_outer_contour(
             (3, 3),
         )
     
+        # Luk små indhak langs yderkonturen.
         cleaned_mask = cv2.morphologyEx(
             mask,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=1,
+        )
+        
+        # Fjern derefter små udstikkere.
+        cleaned_mask = cv2.morphologyEx(
+            cleaned_mask,
             cv2.MORPH_OPEN,
             kernel,
             iterations=1,
