@@ -37,6 +37,51 @@ from reportlab.graphics import renderPDF
 
 from svglib.svglib import svg2rlg
 
+
+# ==========================================
+# AVART – CENTRALE FARVER
+# ==========================================
+
+AVART_COLORS = {
+    "moss": {
+        "CMYK": (25, 0, 50, 75),
+        "RGB": (68, 72, 50),
+    },
+    "wine": {
+        "CMYK": (50, 75, 75, 50),
+        "RGB": (93, 53, 42),
+    },
+    "sea": {
+        "CMYK": (75, 25, 25, 65),
+        "RGB": (26, 64, 78),
+    },
+    "camel": {
+        "CMYK": (0, 25, 50, 50),
+        "RGB": (152, 125, 88),
+    },
+    "dark": {
+        "CMYK": (20, 20, 20, 100),
+        "RGB": (0, 0, 0),
+    },
+    "light": {
+        "CMYK": (0, 0, 0, 0),
+        "RGB": (251, 250, 247),
+    },
+}
+
+
+def avart_cmyk(style):
+    from reportlab.lib import colors
+
+    c, m, y, k = AVART_COLORS[style]["CMYK"]
+
+    return colors.CMYKColor(
+        c / 100,
+        m / 100,
+        y / 100,
+        k / 100,
+    )
+
 # --------------------------------------------------
 # AVART DATABASE CONNECTION
 # --------------------------------------------------
@@ -1638,12 +1683,12 @@ def generate_multi_poster_pdf(
     # ------------------------------------------------
 
     style_colors = {
-        "light": None,
-        "dark": colors.CMYKColor(0.2, 0.2, 0.2, 1),
-        "moss": colors.CMYKColor(0.25, 0, 0.50, 0.75),
-        "wine": colors.CMYKColor(0.50, 0.75, 0.75, 0.50),
-        "camel": colors.CMYKColor(0, 0.25, 0.50, 0.50),
-        "sea": colors.CMYKColor(0.75, 0.25, 0.25, 0.65),
+        "light": avart_cmyk("light"),
+        "dark": avart_cmyk("dark"),
+        "moss": avart_cmyk("moss"),
+        "wine": avart_cmyk("wine"),
+        "camel": avart_cmyk("camel"),
+        "sea": avart_cmyk("sea"),
     }
 
     if style not in style_colors:
@@ -2370,13 +2415,22 @@ def upload_production_pdf(pdf_bytes: bytes, filename: str):
 # --------------------------------------------------
 # AVART – PRINT PDF MED 3 MM BLEED OG SKÆREMÆRKER
 # --------------------------------------------------
-
-def make_print_ready_pdf(pdf_bytes: bytes, bleed_mm: float = 3) -> bytes:
+def make_print_ready_pdf(
+    pdf_bytes: bytes,
+    bleed_mm: float = 3,
+    style: str = "light",
+) -> bytes:
     """
     Tilføjer 3 mm bleed, skæremærker og PDF-beskæringsbokse.
+    Bruger AVARTs centrale CMYK-farver.
     Bevarer den eksisterende PDF som vektorgrafik.
     """
+    import io
     import fitz
+    from reportlab.pdfgen import canvas
+
+    if style not in AVART_COLORS:
+        raise ValueError(f"Unknown poster style: {style}")
 
     source = fitz.open(stream=pdf_bytes, filetype="pdf")
     output = fitz.open()
@@ -2392,11 +2446,13 @@ def make_print_ready_pdf(pdf_bytes: bytes, bleed_mm: float = 3) -> bytes:
 
             # Plads til bleed og skæremærker
             margin = bleed + mark_gap + mark_length
+
             page = output.new_page(
                 width=w + 2 * margin,
                 height=h + 2 * margin,
             )
 
+            # Plakatens færdige beskæringsformat
             trim = fitz.Rect(
                 margin,
                 margin,
@@ -2404,39 +2460,77 @@ def make_print_ready_pdf(pdf_bytes: bytes, bleed_mm: float = 3) -> bytes:
                 margin + h,
             )
 
-            # Indsæt original PDF som vektorgrafik
-            page.show_pdf_page(trim, source, source_page.number)
+            # Bleed-området: 3 mm på alle sider
+            bleed_rect = fitz.Rect(
+                trim.x0 - bleed,
+                trim.y0 - bleed,
+                trim.x1 + bleed,
+                trim.y1 + bleed,
+            )
 
-            # Udvid kantfarven til bleed-området.
-            # Dette udfylder bleed for plakater med farvet baggrund.
-            if source_page.get_drawings():
-                drawings = source_page.get_drawings()
-                background = next(
-                    (
-                        d.get("fill")
-                        for d in drawings
-                        if d.get("fill") is not None
-                        and d["rect"].width >= w - 1
-                        and d["rect"].height >= h - 1
-                    ),
-                    None,
+            # ------------------------------------------
+            # BAGGRUND + BLEED I KORREKT CMYK
+            # ------------------------------------------
+
+            bleed_buffer = io.BytesIO()
+
+            bleed_canvas = canvas.Canvas(
+                bleed_buffer,
+                pagesize=(
+                    page.rect.width,
+                    page.rect.height,
+                ),
+                pageCompression=1,
+            )
+
+            # Hent farven fra AVART_COLORS
+            bleed_canvas.setFillColor(
+                avart_cmyk(style)
+            )
+
+            # Tegn baggrunden inklusive 3 mm bleed
+            bleed_canvas.rect(
+                bleed_rect.x0,
+                page.rect.height - bleed_rect.y1,
+                bleed_rect.width,
+                bleed_rect.height,
+                fill=1,
+                stroke=0,
+            )
+
+            bleed_canvas.save()
+
+            # Indsæt CMYK-baggrunden i PDF'en
+            bleed_pdf = fitz.open(
+                stream=bleed_buffer.getvalue(),
+                filetype="pdf",
+            )
+
+            try:
+                page.show_pdf_page(
+                    page.rect,
+                    bleed_pdf,
+                    0,
+                    overlay=False,
                 )
+            finally:
+                bleed_pdf.close()
 
-                if background is not None:
-                    bleed_rect = fitz.Rect(
-                        trim.x0 - bleed,
-                        trim.y0 - bleed,
-                        trim.x1 + bleed,
-                        trim.y1 + bleed,
-                    )
-                    page.draw_rect(
-                        bleed_rect,
-                        color=None,
-                        fill=background,
-                        overlay=False,
-                    )
+            # ------------------------------------------
+            # ORIGINAL PLAKAT SOM VEKTORGRAFIK
+            # ------------------------------------------
 
-            # Skæremærker – placeret uden for bleed
+            page.show_pdf_page(
+                trim,
+                source,
+                source_page.number,
+                overlay=True,
+            )
+
+            # ------------------------------------------
+            # SKÆREMÆRKER
+            # ------------------------------------------
+
             x0, y0, x1, y1 = trim
             gap = bleed + mark_gap
             length = mark_length
@@ -2445,12 +2539,15 @@ def make_print_ready_pdf(pdf_bytes: bytes, bleed_mm: float = 3) -> bytes:
                 # Øverst venstre
                 ((x0, y0 - gap), (x0, y0 - gap - length)),
                 ((x0 - gap, y0), (x0 - gap - length, y0)),
+
                 # Øverst højre
                 ((x1, y0 - gap), (x1, y0 - gap - length)),
                 ((x1 + gap, y0), (x1 + gap + length, y0)),
+
                 # Nederst venstre
                 ((x0, y1 + gap), (x0, y1 + gap + length)),
                 ((x0 - gap, y1), (x0 - gap - length, y1)),
+
                 # Nederst højre
                 ((x1, y1 + gap), (x1, y1 + gap + length)),
                 ((x1 + gap, y1), (x1 + gap + length, y1)),
@@ -2464,45 +2561,65 @@ def make_print_ready_pdf(pdf_bytes: bytes, bleed_mm: float = 3) -> bytes:
                     width=0.3,
                 )
 
-            # PDF-bokse
-            page.set_trimbox(trim)
-            page.set_bleedbox(
-                fitz.Rect(
-                    trim.x0 - bleed,
-                    trim.y0 - bleed,
-                    trim.x1 + bleed,
-                    trim.y1 + bleed,
-                )
-            )
+            # ------------------------------------------
+            # PDF-BOKSE
+            # ------------------------------------------
 
-        return output.tobytes(garbage=4, deflate=True)
+            page.set_trimbox(trim)
+            page.set_bleedbox(bleed_rect)
+
+        return output.tobytes(
+            garbage=4,
+            deflate=True,
+        )
 
     finally:
         output.close()
         source.close()
 
+
+
 @app.get("/test/print-pdf")
 def test_print_pdf():
     from fastapi.responses import Response
-
-    # Enkel A3-test med farvet baggrund
     from reportlab.pdfgen import canvas
-    from reportlab.lib import colors
     from reportlab.lib.units import mm
+    import io
 
     buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=(297 * mm, 420 * mm))
 
-    c.setFillColor(colors.CMYKColor(0, 25, 50, 50))
-    c.rect(0, 0, 297 * mm, 420 * mm, fill=1, stroke=0)
+    # A3-testplakat
+    c = canvas.Canvas(
+        buffer,
+        pagesize=(297 * mm, 420 * mm),
+    )
 
-    c.setFillColor(colors.CMYKColor(0, 0, 0, 100))
+    # Baggrund: Camel fra centralt farvekartotek
+    c.setFillColor(avart_cmyk("camel"))
+    c.rect(
+        0, 0,
+        297 * mm,
+        420 * mm,
+        fill=1,
+        stroke=0,
+    )
+
+    # Hvid tekst i CMYK
+    c.setFillColor(avart_cmyk("light"))
     c.setFont("Helvetica", 24)
-    c.drawCentredString(148.5 * mm, 210 * mm, "AVART PRINT TEST")
+    c.drawCentredString(
+        148.5 * mm,
+        210 * mm,
+        "AVART PRINT TEST",
+    )
 
     c.save()
 
-    pdf_bytes = make_print_ready_pdf(buffer.getvalue())
+    # Tilføj 3 mm bleed og skæremærker
+    pdf_bytes = make_print_ready_pdf(
+        buffer.getvalue(),
+        style="camel",
+    )
 
     return Response(
         content=pdf_bytes,
@@ -2511,7 +2628,6 @@ def test_print_pdf():
             "Content-Disposition": 'inline; filename="AVART-print-test.pdf"'
         },
     )
-
 
 
 # --------------------------------------------------
@@ -4012,7 +4128,10 @@ def produce_order_pdfs(order_id: int):
                 size=size,
             )
 
-            print_pdf = make_print_ready_pdf(pdf_bytes)
+            print_pdf = make_print_ready_pdf(
+                pdf_bytes,
+                style=style,
+            )
 
             filename = (
                 f"{order['order_number']}_"
