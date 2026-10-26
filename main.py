@@ -706,7 +706,7 @@ def get_smoothed_outer_contour(
     
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE,
-            (3, 3),
+            (5, 5),
         )
     
         # Luk små indhak langs yderkonturen.
