@@ -725,11 +725,12 @@ def get_smoothed_outer_contour(
             iterations=1,
         )
     
-        # Bevar original maske omkring ansigtet.
+        # Beskyt ansigtsprofilen uden at beskytte
+        # unødvendigt meget af hårets øverste del.
         x1 = max(0, int(fx - fw * 0.5))
-        y1 = max(0, int(fy - fh * 0.5))
+        y1 = max(0, int(fy - fh * 0.1))
         x2 = min(mask.shape[1], int(fx + fw * 1.5))
-        y2 = min(mask.shape[0], int(fy + fh * 1.5))
+        y2 = min(mask.shape[0], int(fy + fh * 1.2))
     
         cleaned_mask[y1:y2, x1:x2] = mask[y1:y2, x1:x2]
     
