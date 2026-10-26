@@ -636,14 +636,25 @@ def alpha_to_mask(
         0
     ).astype(np.uint8)
 
-    # Udfyld små huller i tøjet, som skyldes
-    # at baggrundsfjernelsen har fjernet dele
-    # af blusens mønster.
-
     if smooth:
 
-        # Luk indvendige huller i personen.
-        # Bevar den oprindelige yderkontur.
+        # Luk små huller og smalle åbninger.
+        # En lille kernel begrænser påvirkningen
+        # af ansigt og hår.
+
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (3, 3),
+        )
+
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=1,
+        )
+
+        # Udfyld indvendige huller.
 
         contours, hierarchy = cv2.findContours(
             mask.copy(),
@@ -657,7 +668,6 @@ def alpha_to_mask(
 
             for i, contour in enumerate(contours):
 
-                # Kun indvendige huller
                 if hierarchy[0][i][3] != -1:
 
                     cv2.drawContours(
@@ -706,7 +716,7 @@ def get_smoothed_outer_contour(
     
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE,
-            (5, 5),
+            (3, 3),
         )
     
         # Luk små indhak langs yderkonturen.
@@ -727,10 +737,10 @@ def get_smoothed_outer_contour(
     
         # Beskyt ansigtsprofilen uden at beskytte
         # unødvendigt meget af hårets øverste del.
-        x1 = max(0, int(fx - fw * 0.5))
-        y1 = max(0, int(fy - fh * 0.1))
-        x2 = min(mask.shape[1], int(fx + fw * 1.5))
-        y2 = min(mask.shape[0], int(fy + fh * 1.2))
+        x1 = max(0, int(fx - fw * 0.2))
+        y1 = max(0, int(fy))
+        x2 = min(mask.shape[1], int(fx + fw * 1.2))
+        y2 = min(mask.shape[0], int(fy + fh * 1.1))
     
         cleaned_mask[y1:y2, x1:x2] = mask[y1:y2, x1:x2]
     
@@ -814,8 +824,8 @@ def get_smoothed_outer_contour(
     
                 # Gør beskyttelsesområdet lidt større end
                 # selve ansigtsboksen.
-                margin_x = fw * 0.35
-                margin_y = fh * 0.20
+                margin_x = fw * 0.15
+                margin_y = fh * 0.10
     
                 if (
                     fx - margin_x <= px <= fx + fw + margin_x
