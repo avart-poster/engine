@@ -3505,7 +3505,7 @@ async def create_checkout_session(data: dict):
     try:
         for index, item in enumerate(items, start=1):
 
-            size = item["size"].upper()
+            size = item["size"].strip().upper().replace("X", "x") if item["size"].strip().upper() == "50X70" else item["size"].strip().upper()
             style = item["style"]
             name = item.get("name", "")
             persons = item["persons"]
