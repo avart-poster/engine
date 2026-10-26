@@ -347,6 +347,7 @@ def remove_background_if_needed(
     upload: UploadFile,
     max_dimension: int = MAX_DIMENSION,
     return_original: bool = False,
+    noir_test: bool = False,
 ):
     data = upload.file.read()
 
@@ -487,6 +488,23 @@ def remove_background_if_needed(
     # --------------------------------------------------
     # REMBG – ORIGINALBILLEDET
     # --------------------------------------------------
+
+    # TEST: Noir-inspireret behandling før REMBG
+    # Aktiveres kun ved noir_test=True
+    
+    if noir_test:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+        gray = cv2.convertScaleAbs(
+            gray,
+            alpha=1.4,
+            beta=-20,
+        )
+    
+        img = cv2.cvtColor(
+            gray,
+            cv2.COLOR_GRAY2BGR,
+        )
 
     # --------------------------------------------------
     # AUTOMATISK KONTRASTFORBEDRING FØR REMBG
@@ -2693,6 +2711,7 @@ async def alpha_debug(
             file1,
             max_dimension=max_dimension,
             return_original=True,
+            noir_test=True,
         )
         
         face_region = detect_face_region(
