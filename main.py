@@ -3201,7 +3201,22 @@ async def poster_render(
             pixels[background_mask] = target_rgb
         
             preview_rgba = Image.fromarray(pixels, "RGB").convert("RGBA")
+
+        # Fjern hvid baggrund fra LIGHT-preview,
+        # så den korrekte LIGHT-farve kan vises.
+        if style == "light":
+            pixels = np.array(preview_rgba)
         
+            # Find hvide og næsten hvide baggrundspixels
+            rgb = pixels[:, :, :3]
+        
+            white_mask = np.all(rgb >= 250, axis=2)
+        
+            # Gør baggrunden gennemsigtig
+            pixels[white_mask, 3] = 0
+        
+            preview_rgba = Image.fromarray(pixels, "RGBA")
+            
         # LIGHT baggrund kun til preview på hjemmesiden
         preview_background = Image.new(
             "RGBA",
