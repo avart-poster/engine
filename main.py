@@ -1444,6 +1444,15 @@ def estimate_head_width(contour: np.ndarray) -> float:
     return float(head_w)
 
 
+def poster_title_baseline(page_height, margin_mm, font_name, font_size):
+    """Place the capital-letter top at the green design margin."""
+    face = pdfmetrics.getFont(font_name).face
+    cap_height = getattr(face, "capHeight", None)
+    if not cap_height or cap_height <= 0:
+        cap_height = pdfmetrics.getAscent(font_name)
+    return page_height - margin_mm * mm - cap_height * font_size / 1000
+
+
 def generate_poster_pdf(
     svg_string: str,
     name: str,
@@ -1474,9 +1483,11 @@ def generate_poster_pdf(
         title_font_size = 25
         logo_width_mm = 30
 
-    top_band_h = TOP_BAND_MM * mm
+    # Text and logo follow the green margin, not the red silhouette safe area.
+    green_margin_mm = {60: 65, 50: 50, 40: 45, 30: 30}[logo_width_mm]
+    title_y = poster_title_baseline(height, green_margin_mm, TITLE_FONT, title_font_size)
     logo_width = logo_width_mm * mm
-    logo_bottom = LOGO_BOTTOM_MM * mm
+    logo_bottom = green_margin_mm * mm
 
     # ------------------------------------------------
     # Midlertidig SVG-fil
@@ -1532,7 +1543,7 @@ def generate_poster_pdf(
 
         c.drawCentredString(
             width / 2,
-            height - (top_band_h / 2),
+            title_y,
             name,
         )
 
@@ -1823,9 +1834,11 @@ def generate_multi_poster_pdf(
         title_font_size = 25
         logo_width_mm = 30
 
-    top_band_h = TOP_BAND_MM * mm
+    # Text and logo follow the green margin. Keep the red silhouette safe area below unchanged.
+    green_margin_mm = size_side_margins_mm[size]
+    title_y = poster_title_baseline(height, green_margin_mm, TITLE_FONT, title_font_size)
     logo_width = logo_width_mm * mm
-    logo_bottom = LOGO_BOTTOM_MM * mm
+    logo_bottom = green_margin_mm * mm
 
 
 
@@ -2023,7 +2036,7 @@ def generate_multi_poster_pdf(
 
     c.drawCentredString(
         width / 2,
-        height - (top_band_h / 2),
+        title_y,
         name,
     )
 
