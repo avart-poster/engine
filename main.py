@@ -105,10 +105,6 @@ def get_db_connection():
 
 register_heif_opener()
 
-pdfmetrics.registerFont(
-    TTFont("The Seasons Bold", "assets/The Seasons Bold.ttf")
-)
-
 # ----------------------------------
 # AVART DESIGN SETTINGS
 # ----------------------------------
@@ -145,13 +141,69 @@ app = FastAPI(
     description="Avart silhouette engine with SVG + PDF poster output",
 )
 
+# Kun vores egne domæner må kalde motoren fra en browser.
+# Kan ændres på Render med ALLOWED_ORIGINS (kommasepareret).
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "ALLOWED_ORIGINS",
+        "https://avart.dk,https://www.avart.dk",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --------------------------------------------------
+# SIKKERHED: TEST-ENDPOINTS OG SVG-SIGNATUR
+# --------------------------------------------------
+
+import hmac
+import hashlib
+from fastapi import HTTPException
+
+MAX_UPLOAD_MB = 20
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+# Test-/debug-endpoints er slået fra, medmindre ENABLE_TEST_ENDPOINTS=1 på Render.
+TEST_ENDPOINTS_ENABLED = os.environ.get("ENABLE_TEST_ENDPOINTS") == "1"
+
+
+def require_test_endpoints():
+    if not TEST_ENDPOINTS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+# Hemmelig nøgle, som kun serveren kender (sæt SVG_SIGNING_SECRET på Render).
+SVG_SIGNING_SECRET = os.environ.get("SVG_SIGNING_SECRET", "")
+
+if not SVG_SIGNING_SECRET:
+    print("ADVARSEL: SVG_SIGNING_SECRET mangler – silhuetter bliver ikke kontrolleret.", flush=True)
+
+
+def sign_svg(svg: str) -> str:
+    if not SVG_SIGNING_SECRET:
+        return ""
+    return hmac.new(
+        SVG_SIGNING_SECRET.encode("utf-8"),
+        svg.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def verify_svg(svg, signature) -> bool:
+    if not SVG_SIGNING_SECRET:
+        return True
+    if not isinstance(svg, str) or not isinstance(signature, str):
+        return False
+    return hmac.compare_digest(sign_svg(svg), signature)
 
 
 # ------------------------------------------------
@@ -265,39 +317,10 @@ def detect_face_region(original_rgb: np.ndarray):
 def health():
     return {"ok": True, "service": "avart-engine"}
 
-# ---------------------------------------------
-# DATABASE CONNECTION – AVART ORDERS
-# ---------------------------------------------
-
-def get_db_connection():
-    return pymysql.connect(
-        host=os.environ["DB_HOST"],
-        port=int(os.environ.get("DB_PORT", "3306")),
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
-        database=os.environ["DB_NAME"],
-        charset="utf8mb4",
-        connect_timeout=10,
-        read_timeout=10,
-        write_timeout=10,
-        autocommit=False,
-        cursorclass=pymysql.cursors.DictCursor,
-    )
-
-
-
 @app.get("/health/database")
 def database_health():
     try:
-        connection = pymysql.connect(
-            host=os.environ["DB_HOST"],
-            port=int(os.environ.get("DB_PORT", "3306")),
-            user=os.environ["DB_USER"],
-            password=os.environ["DB_PASSWORD"],
-            database=os.environ["DB_NAME"],
-            connect_timeout=10,
-            read_timeout=10,
-        )
+        connection = get_db_connection()
 
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -349,10 +372,15 @@ def remove_background_if_needed(
     return_original: bool = False,
     noir_test: bool = False,
 ):
-    data = upload.file.read()
+    data = upload.file.read(MAX_UPLOAD_BYTES + 1)
 
     if not data:
         raise ValueError("Empty file")
+
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(
+            f"Billedet er for stort. Maks {MAX_UPLOAD_MB} MB pr. billede."
+        )
 
     # --------------------------------------------------
     # ÅBN BILLEDE MED KORREKT ORIENTERING
@@ -2388,57 +2416,6 @@ def generate_multi_poster_pdf(
             except Exception:
                 pass
 
-# --------------------------------------------------
-# AVART – OVERFØR PRODUKTIONSFIL TIL CHOSTING
-# --------------------------------------------------
-
-def upload_production_pdf(pdf_bytes: bytes, filename: str):
-
-    import re
-
-    if not re.fullmatch(r"AVA-[A-F0-9]+_[0-9]+\.pdf", filename):
-        raise ValueError("Ugyldigt produktionsfilnavn.")
-
-    remote_host = "178.20.216.107"
-    remote_user = "avartdk"
-    remote_folder = "/home/avartdk/avart-orders"
-
-    ssh_key = "/etc/secrets/avart_render_new"
-
-    with tempfile.NamedTemporaryFile(
-        suffix=".pdf",
-        delete=False,
-    ) as temp_file:
-
-        temp_file.write(pdf_bytes)
-        temp_path = temp_file.name
-
-    try:
-
-        subprocess.run(
-            [
-                "scp",
-                "-4",
-                "-P", "222",
-                "-i", ssh_key,
-                "-o", "BatchMode=yes",
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "ConnectTimeout=15",
-                temp_path,
-                f"{remote_user}@{remote_host}:{remote_folder}/{filename}",
-            ],
-            check=True,
-            timeout=120,
-            capture_output=True,
-            text=True,
-        )
-
-        return f"{remote_folder}/{filename}"
-
-    finally:
-
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
 
 
 # --------------------------------------------------
@@ -2610,6 +2587,7 @@ def make_print_ready_pdf(
 
 @app.get("/test/print-pdf")
 def test_print_pdf():
+    require_test_endpoints()
     from fastapi.responses import Response
     from reportlab.pdfgen import canvas
     from reportlab.lib.units import mm
@@ -2678,6 +2656,7 @@ async def alpha_preview(
     crop_to_subject: bool = Query(True),
     pad: int = Query(30, ge=0, le=300),
 ):
+    require_test_endpoints()
     try:
         rgba = remove_background_if_needed(file1, max_dimension=max_dimension)
         h, w = rgba.shape[:2]
@@ -2717,6 +2696,7 @@ async def alpha_debug(
     thickness: int = Query(2, ge=1, le=12),
     upscale: int = Query(4, ge=1, le=8),
 ):
+    require_test_endpoints()
     try:
         rgba, original_rgb = remove_background_if_needed(
             file1,
@@ -2775,6 +2755,7 @@ async def alpha_svg(
     crop_to_subject: bool = Query(True),
     pad: int = Query(30, ge=0, le=300),
 ):
+    require_test_endpoints()
     try:
         rgba = remove_background_if_needed(file, max_dimension=max_dimension)
         h, w = rgba.shape[:2]
@@ -3013,6 +2994,7 @@ async def poster_process(
                 {
                     "index": index,
                     "svg": svg,
+                    "svg_sig": sign_svg(svg),
                     "head_width": head_width,
                     "scale_level": 0,
                     "flip": False,
@@ -3113,6 +3095,11 @@ async def poster_render(
             if not svg:
                 raise ValueError(
                     "Person is missing SVG data"
+                )
+
+            if not verify_svg(svg, person.get("svg_sig")):
+                raise ValueError(
+                    "Silhuetten kunne ikke godkendes. Upload billedet igen."
                 )
 
             persons.append(
@@ -3555,6 +3542,9 @@ async def create_checkout_session(data: dict):
                 if not isinstance(person.get("svg"), str) or not person["svg"]:
                     raise ValueError("En person mangler SVG.")
 
+                if not verify_svg(person["svg"], person.get("svg_sig")):
+                    raise ValueError("Silhuetten kunne ikke godkendes. Upload billedet igen.")
+
                 if person.get("scale_level", 0) not in (-2, -1, 0, 1, 2):
                     raise ValueError("Ugyldig skalering.")
 
@@ -3821,11 +3811,19 @@ def avart_download_terms_pdf():
 
 
 def avart_poster_preview(items):
-    """Brug den faktiske produktions-PDF, ikke en standardplakat."""
+    """Generér den faktiske produktions-PDF direkte til preview."""
     first = items[0]
-    if not first.get("production_pdf_path"):
-        raise ValueError("Produktionsfil mangler til kundens plakatpreview")
-    _, pdf_bytes = download_production_pdf(first["production_pdf_path"])
+    design = json.loads(first["design_json"])
+    persons = design["persons"]
+    orientation = "portrait" if len(persons) <= 2 else "landscape"
+    pdf_bytes = generate_multi_poster_pdf(
+        persons=persons,
+        name=design["name"],
+        stroke_width=DEFAULT_STROKE_WIDTH,
+        orientation=orientation,
+        style=design["style"],
+        size=design["size"],
+    )
     document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         pixmap = document[0].get_pixmap(matrix=pymupdf.Matrix(0.6, 0.6), alpha=False)
@@ -3961,38 +3959,6 @@ def send_customer_confirmation(order_id):
         connection.close()
 
 
-def download_production_pdf(remote_path):
-    """Henter en færdig produktions-PDF fra cHosting."""
-
-    import re
-
-    filename = os.path.basename(remote_path)
-
-    if not re.fullmatch(r"AVA-[A-F0-9]+_[0-9]+\.pdf", filename):
-        raise ValueError("Ugyldigt produktionsfilnavn.")
-
-    expected_path = f"/home/avartdk/avart-orders/{filename}"
-
-    if remote_path != expected_path:
-        raise ValueError("Ugyldig produktionsfilsti.")
-
-    result = subprocess.run(
-        [
-            "ssh",
-            "-p", "222",
-            "-i", "/etc/secrets/avart_render_new",
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "avartdk@178.20.216.107",
-            "cat",
-            expected_path,
-        ],
-        check=True,
-        capture_output=True,
-        timeout=120,
-    )
-
-    return filename, result.stdout
 
 def send_production_email(order_id):
     """Sender produktionsfiler og leveringsoplysninger til trykkeriet."""
@@ -4036,21 +4002,48 @@ def send_production_email(order_id):
 
         attachments = []
         poster_lines = []
+        item_files = []
 
         for index, item in enumerate(items, start=1):
-            if not item["production_pdf_path"]:
-                raise ValueError("En produktions-PDF mangler.")
+            design = json.loads(item["design_json"])
 
-            filename, pdf_bytes = download_production_pdf(
-                item["production_pdf_path"]
+            persons = design["persons"]
+            name = design["name"]
+            style = design["style"]
+            size = design["size"]
+
+            orientation = (
+                "portrait"
+                if len(persons) <= 2
+                else "landscape"
             )
 
-            attachments.append((filename, pdf_bytes))
+            pdf_bytes = generate_multi_poster_pdf(
+                persons=persons,
+                name=name,
+                stroke_width=DEFAULT_STROKE_WIDTH,
+                orientation=orientation,
+                style=style,
+                size=size,
+            )
+
+            print_pdf = make_print_ready_pdf(
+                pdf_bytes,
+                style=style,
+            )
+
+            filename = (
+                f"{order['order_number']}_"
+                f"{item['item_number']}.pdf"
+            )
+
+            attachments.append((filename, print_pdf))
+            item_files.append((item["id"], filename))
 
             poster_lines.append(
                 f"Plakat {index}: "
-                f"{item.get('size') or 'Ukendt størrelse'} / "
-                f"{item.get('style') or 'Ukendt stil'}"
+                f"{design.get('size') or 'Ukendt størrelse'} / "
+                f"{design.get('style') or 'Ukendt stil'}"
             )
 
         body = f"""NY PRODUKTIONSORDRE – AVART
@@ -4092,125 +4085,22 @@ De trykklare PDF-filer er vedhæftet.
                 (order_id,),
             )
 
+            for item_id, filename in item_files:
+                cursor.execute(
+                    """
+                    UPDATE order_items
+                    SET production_pdf_path = %s
+                    WHERE id = %s
+                    """,
+                    (filename, item_id),
+                )
+
         connection.commit()
 
     finally:
         connection.close()
 
 
-# --------------------------------------------------
-# AVART – PRODUKTIONSFILER TIL BETALTE ORDRER
-# --------------------------------------------------
-
-def produce_order_pdfs(order_id: int):
-    """
-    Genererer produktions-PDF'er for en betalt ordre
-    og overfører dem til cHosting.
-    """
-
-    connection = get_db_connection()
-
-    try:
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT order_number, payment_status
-                FROM orders
-                WHERE id = %s
-                """,
-                (order_id,),
-            )
-
-            order = cursor.fetchone()
-
-            if not order:
-                raise ValueError("Ordren findes ikke.")
-
-            if order["payment_status"] != "paid":
-                raise ValueError("Ordren er ikke betalt.")
-
-            cursor.execute(
-                """
-                SELECT id, item_number, design_json, production_pdf_path
-                FROM order_items
-                WHERE order_id = %s
-                ORDER BY item_number
-                """,
-                (order_id,),
-            )
-
-            items = cursor.fetchall()
-
-        for item in items:
-
-            if item["production_pdf_path"]:
-                print(
-                    f"AVART: PDF findes allerede for plakat {item['item_number']}",
-                    flush=True,
-                )
-                continue
-
-            design = json.loads(item["design_json"])
-
-            persons = design["persons"]
-            name = design["name"]
-            style = design["style"]
-            size = design["size"]
-
-            orientation = (
-                "portrait"
-                if len(persons) <= 2
-                else "landscape"
-            )
-
-            pdf_bytes = generate_multi_poster_pdf(
-                persons=persons,
-                name=name,
-                stroke_width=DEFAULT_STROKE_WIDTH,
-                orientation=orientation,
-                style=style,
-                size=size,
-            )
-
-            print_pdf = make_print_ready_pdf(
-                pdf_bytes,
-                style=style,
-            )
-
-            filename = (
-                f"{order['order_number']}_"
-                f"{item['item_number']}.pdf"
-            )
-
-            remote_path = upload_production_pdf(
-                print_pdf,
-                filename,
-            )
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE order_items
-                    SET production_pdf_path = %s
-                    WHERE id = %s
-                      AND order_id = %s
-                    """,
-                    (
-                        remote_path,
-                        item["id"],
-                        order_id,
-                    ),
-                )
-            
-            connection.commit()
-
-            print(
-                f"AVART PRODUCTION FILE: {remote_path}",
-                flush=True,
-            )
-
-    finally:
-        connection.close()
 
 
 
@@ -4377,19 +4267,6 @@ async def stripe_webhook(request: Request):
         if connection:
             connection.close()
             
-    try:
-        produce_order_pdfs(int(order["id"]))
-    except Exception as e:
-        print(
-            f"AVART PDF PRODUCTION ERROR: {type(e).__name__}: {e}",
-            flush=True,
-        )
-        return JSONResponse(
-            {"error": "PDF-produktionen mislykkedes."},
-            status_code=500,
-        )
-
-
     try:
         send_production_email(int(order["id"]))
         print(
