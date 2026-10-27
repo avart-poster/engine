@@ -3684,6 +3684,7 @@ async def create_checkout_session(data: dict):
         session = stripe.checkout.Session.create(
             mode="payment",
             line_items=line_items,
+            allow_promotion_codes=True,
 
             shipping_options=[
                 {
