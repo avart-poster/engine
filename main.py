@@ -3528,10 +3528,36 @@ async def create_checkout_session(data: dict):
 
     line_items = []
     validated_items = []
+    gift_items = []
     subtotal = 0
 
     try:
         for index, item in enumerate(items, start=1):
+
+            # Gavekort i samme kurv som plakater
+            if item.get("type") == "gift":
+                amount_ore, gift_size = gift_amount_from_request(
+                    {"size": item.get("size"), "amount": item.get("price")}
+                )
+                subtotal += amount_ore // 100
+                gift_items.append({
+                    "item_number": index,
+                    "amount_ore": amount_ore,
+                    "size": gift_size,
+                })
+                gift_name = (
+                    f"AVART gavekort – {GIFT_SIZE_LABELS[gift_size]} plakat"
+                    if gift_size else "AVART gavekort"
+                )
+                line_items.append({
+                    "price_data": {
+                        "currency": "dkk",
+                        "product_data": {"name": gift_name},
+                        "unit_amount": amount_ore,
+                    },
+                    "quantity": 1,
+                })
+                continue
 
             size = item["size"].strip().upper().replace("X", "x") if item["size"].strip().upper() == "50X70" else item["size"].strip().upper()
             style = item["style"]
@@ -3666,6 +3692,16 @@ async def create_checkout_session(data: dict):
                     ),
                 )
 
+            # Gavekort købt i denne ordre (blandet kurv) – hvert gavekort
+            # får sit eget kort og sin egen kode, når betalingen er gennemført
+            for gift in gift_items:
+                reference = "GAVE-" + secrets.token_hex(5).upper()
+                cursor.execute(
+                    "INSERT INTO avart_gift_purchases (reference, amount_ore, poster_size) VALUES (%s, %s, %s)",
+                    (reference, gift["amount_ore"], gift["size"]),
+                )
+                gift["reference"] = reference
+
             # Gavekort: reserver saldo (kun plakater – fragt betales altid)
             if gift_normalize_code(gift_code):
                 gift_ore = reserve_gift_card(cursor, gift_code, order_id, subtotal * 100)
@@ -3709,7 +3745,7 @@ async def create_checkout_session(data: dict):
         session = stripe.checkout.Session.create(
             mode="payment",
             line_items=line_items,
-            allow_promotion_codes=True,
+            allow_promotion_codes=False,
 
             shipping_options=[
                 {
@@ -3764,6 +3800,12 @@ async def create_checkout_session(data: dict):
                     """,
                     (session.id, order_id),
                 )
+
+                for gift in gift_items:
+                    cursor.execute(
+                        "UPDATE avart_gift_purchases SET stripe_session_id = %s WHERE reference = %s",
+                        (session.id, gift["reference"]),
+                    )
 
             connection.commit()
 
@@ -3881,7 +3923,7 @@ def avart_poster_preview(items):
         document.close()
 
 
-def avart_customer_email_html(order, items):
+def avart_customer_email_html(order, items, gift_rows=None):
     template_path = os.path.join(os.path.dirname(__file__), "email_templates", "ordrebekraeftelse.html")
     with open(template_path, encoding="utf-8") as file:
         template = file.read()
@@ -3898,6 +3940,7 @@ def avart_customer_email_html(order, items):
         size = {"50x70": "500×700 mm", "A3": "297×420 mm", "A2": "420×594 mm", "A1": "594×841 mm"}.get(item["size"], item["size"])
         rows.append('<tr><td style="padding:21px 0 18px">{}</td><td style="padding:21px 0 18px">{}</td><td style="padding:21px 0 18px">1 stk.</td><td align="right" style="padding:21px 0 18px">{}</td></tr>'.format(
             html_escape(str(item["style"]).upper()), html_escape(size), avart_money(item["price_dkk"])))
+    rows.extend(gift_rows or [])
     address = ", ".join(filter(None, [order.get("shipping_address"),
                  " ".join(filter(None, [str(order.get("shipping_postal_code") or ""), order.get("shipping_city") or ""]))]))
     total = (order["amount_paid_ore"] / 100) if order.get("amount_paid_ore") is not None else float(order["total_dkk"])
@@ -3947,10 +3990,33 @@ def send_customer_confirmation(order_id):
             )
             items = cursor.fetchall()
 
+            # Gavekort købt i samme ordre (blandet kurv)
+            gift_rows = []
+            if order.get("stripe_session_id"):
+                cursor.execute(
+                    "SELECT poster_size, amount_ore FROM avart_gift_purchases "
+                    "WHERE stripe_session_id = %s ORDER BY id",
+                    (order["stripe_session_id"],),
+                )
+                for gift in cursor.fetchall():
+                    if gift["poster_size"]:
+                        gift_label = "GAVEKORT – " + GIFT_SIZE_LABELS[gift["poster_size"]]
+                    else:
+                        gift_label = "GAVEKORT – " + avart_money(gift["amount_ore"] / 100) + " kr."
+                    gift_rows.append(
+                        '<tr><td style="padding:21px 0 18px">{}</td>'
+                        '<td style="padding:21px 0 18px"></td>'
+                        '<td style="padding:21px 0 18px">1 stk.</td>'
+                        '<td align="right" style="padding:21px 0 18px">{}</td></tr>'.format(
+                            html_escape(gift_label),
+                            avart_money(gift["amount_ore"] / 100),
+                        )
+                    )
+
         if not items:
             raise ValueError("Ordren har ingen produkter")
 
-        html = avart_customer_email_html(order, items)
+        html = avart_customer_email_html(order, items, gift_rows)
         terms = avart_download_terms_pdf()
         preview = avart_poster_preview(items)
         logo_path = os.path.join(
@@ -4173,7 +4239,7 @@ GIFT_VALID_YEARS = 3  # Dansk standard forældelse for gavekort
 def gift_normalize_code(code):
     if not isinstance(code, str):
         return ""
-    return "".join(ch for ch in code.upper() if ch.isalnum())
+    return "".join(ch for ch in code.lower() if ch.isalnum())
 
 
 def gift_code_hash(code):
@@ -4181,9 +4247,10 @@ def gift_code_hash(code):
 
 
 def gift_new_code():
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    raw = "".join(secrets.choice(alphabet) for _ in range(12))
-    return "AVART-" + "-".join(raw[i:i + 4] for i in range(0, 12, 4))
+    # Små bogstaver som i Louises eksempel (akls486e3).
+    # Tegn der let forveksles (i, l, o, 0, 1) er udeladt.
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(9))
 
 
 def gift_amount_from_request(data):
@@ -4295,42 +4362,57 @@ async def gift_card_balance(data: dict):
 
 @app.post("/gift-card/checkout")
 async def gift_card_checkout(data: dict):
+
+    # Ét eller flere gavekort ad gangen:
+    # {"gifts": [{"size": "A2"}, {"amount": "500"}]}
+    gifts = data.get("gifts")
+    if not isinstance(gifts, list) or not 1 <= len(gifts) <= 10:
+        gifts = [data]
+
+    parsed = []
     try:
-        amount_ore, size = gift_amount_from_request(data)
+        for gift in gifts:
+            amount_ore, size = gift_amount_from_request(gift)
+            parsed.append((amount_ore, size))
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
-    reference = "GAVE-" + secrets.token_hex(5).upper()
-    name = f"AVART gavekort – {GIFT_SIZE_LABELS[size]} plakat" if size else "AVART gavekort"
-
+    references = []
     connection = get_db_connection()
     try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO avart_gift_purchases (reference, amount_ore, poster_size) VALUES (%s, %s, %s)",
-                (reference, amount_ore, size),
-            )
-            purchase_id = cursor.lastrowid
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        return JSONResponse({"error": "Gavekortet kunne ikke oprettes."}, status_code=500)
+        try:
+            with connection.cursor() as cursor:
+                for amount_ore, size in parsed:
+                    reference = "GAVE-" + secrets.token_hex(5).upper()
+                    cursor.execute(
+                        "INSERT INTO avart_gift_purchases (reference, amount_ore, poster_size) VALUES (%s, %s, %s)",
+                        (reference, amount_ore, size),
+                    )
+                    references.append(reference)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            return JSONResponse({"error": "Gavekortet kunne ikke oprettes."}, status_code=500)
     finally:
         connection.close()
+
+    line_items = []
+    for amount_ore, size in parsed:
+        name = f"AVART gavekort – {GIFT_SIZE_LABELS[size]} plakat" if size else "AVART gavekort"
+        line_items.append({
+            "price_data": {
+                "currency": "dkk",
+                "product_data": {"name": name},
+                "unit_amount": amount_ore,
+            },
+            "quantity": 1,
+        })
 
     try:
         session = stripe.checkout.Session.create(
             mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": "dkk",
-                    "product_data": {"name": name},
-                    "unit_amount": amount_ore,
-                },
-                "quantity": 1,
-            }],
-            client_reference_id=reference,
-            metadata={"kind": "gift_card", "purchase_id": str(purchase_id), "reference": reference},
+            line_items=line_items,
+            metadata={"kind": "gift_card"},
             customer_creation="if_required",
             billing_address_collection="auto",
             success_url="https://avart.dk/?payment=success&gift=1&session_id={CHECKOUT_SESSION_ID}",
@@ -4340,8 +4422,11 @@ async def gift_card_checkout(data: dict):
         connection = get_db_connection()
         try:
             with connection.cursor() as cursor:
-                cursor.execute("UPDATE avart_gift_purchases SET stripe_session_id = %s WHERE id = %s",
-                               (session.id, purchase_id))
+                for reference in references:
+                    cursor.execute(
+                        "UPDATE avart_gift_purchases SET stripe_session_id = %s WHERE reference = %s",
+                        (session.id, reference),
+                    )
             connection.commit()
         finally:
             connection.close()
@@ -4350,116 +4435,226 @@ async def gift_card_checkout(data: dict):
         return JSONResponse({"error": "Betalingen kunne ikke oprettes. Prøv igen."}, status_code=500)
 
 
+# --------------------------------------------------
+# GAVEKORT-PDF – Louises foldbare A4-skabelon.
+# Kun de lyserøde felter udfyldes; resten af designet røres ikke.
+# Skabelon og skrifttyper ligger i mappen "giftcard" ved siden af main.py.
+# --------------------------------------------------
+GIFTCARD_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "giftcard", "giftcard_template.pdf")
+GIFTCARD_FONT_SEASONS = os.path.join(os.path.dirname(__file__), "giftcard", "The-Seasons-Bold.ttf")
+GIFTCARD_FONT_SS3_SEMI = os.path.join(os.path.dirname(__file__), "giftcard", "SourceSans3-Semibold.ttf")
+GIFTCARD_FONT_SS3_REG = os.path.join(os.path.dirname(__file__), "giftcard", "SourceSans3-Regular.ttf")
+
+GIFTCARD_MONTHS = ["", "januar", "februar", "marts", "april", "maj", "juni",
+                   "juli", "august", "september", "oktober", "november", "december"]
+
+
+def _gift_span_is_pink(span):
+    color = span["color"]
+    red = (color >> 16) & 255
+    green = (color >> 8) & 255
+    blue = color & 255
+    return red >= 200 and green <= 70 and blue >= 100
+
+
 def gift_card_pdf(code, amount_ore, size, expires_at):
-    """Printbart gavekort i A5 liggende."""
+    """Udfylder skabelonen: overskrift, værdi, kode og udløbsdato i sort."""
+    document = pymupdf.open(GIFTCARD_TEMPLATE_PATH)
+    page = document[0]
+
+    spans = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                if span["text"].strip():
+                    spans.append(span)
+
+    pink_spans = [span for span in spans if _gift_span_is_pink(span)]
+
+    # Find linjen med værdien (teksten "værdi") og ryd hele linjen
+    value_y = None
+    for span in spans:
+        if "værdi" in span["text"].lower():
+            value_y = span["bbox"][1]
+    if value_y is not None:
+        for span in spans:
+            if abs(span["bbox"][1] - value_y) < 3:
+                page.add_redact_annot(pymupdf.Rect(span["bbox"]))
+    for span in pink_spans:
+        page.add_redact_annot(pymupdf.Rect(span["bbox"]))
+    page.apply_redactions(images=0, graphics=0)
+
+    font_seasons = pymupdf.Font(fontfile=GIFTCARD_FONT_SEASONS)
+    font_ss3_semi = pymupdf.Font(fontfile=GIFTCARD_FONT_SS3_SEMI)
+    font_ss3_reg = pymupdf.Font(fontfile=GIFTCARD_FONT_SS3_REG)
+
+    black = (0x23 / 255, 0x1F / 255, 0x20 / 255)
+    writer = pymupdf.TextWriter(page_rect=page.rect)
+
+    def put(x, y, font_size, text, font):
+        writer.append((x, y), text, font=font, fontsize=font_size)
+
+    # Overskrift: "Gavekort, A2" → "Gavekort, 500 kr."
+    heading_text = size if size else f"{int(amount_ore / 100)} kr."
+    heading = [s for s in pink_spans
+               if s["font"].endswith("TheSeasonsBold") and s["bbox"][1] < 200]
+    if heading:
+        span = heading[0]
+        put(span["origin"][0], span["origin"][1], span["size"], heading_text, font_seasons)
+
+    # Koden centreret i den hvide boks
+    box = pymupdf.Rect(72.1, 258.1, 345.4, 293.9)
+    code_spans = [s for s in pink_spans
+                  if s["font"].endswith("TheSeasonsBold") and s["bbox"][1] >= 200]
+    if code_spans:
+        span = code_spans[0]
+        code_width = font_seasons.text_length(code, span["size"])
+        put((box.x0 + box.x1) / 2 - code_width / 2, span["origin"][1],
+            span["size"], code, font_seasons)
+
+    # Værdilinjen skrives igen i sort
+    value_base = None
+    for span in spans:
+        if "værdi" in span["text"].lower():
+            value_base = span["origin"][1]
+    if value_base is not None:
+        x = 72.1
+        for text, font in (
+            ("en ", font_ss3_reg),
+            ("værdi på ", font_ss3_semi),
+            (f"{int(amount_ore / 100)}", font_ss3_semi),
+            (" kr. ", font_ss3_semi),
+            ("og kan bruges til alle plakatstørrelser.", font_ss3_reg),
+        ):
+            put(x, value_base, 10, text, font)
+            x += font.text_length(text, 10)
+
+    # Udløbsdato
+    date_spans = [s for s in pink_spans
+                  if s["font"].startswith("SourceSans3-Semibold") and s["bbox"][1] > 380]
+    if date_spans:
+        span = date_spans[0]
+        date_text = f"{expires_at.day}. {GIFTCARD_MONTHS[expires_at.month]} {expires_at.year}."
+        put(span["origin"][0], span["origin"][1], span["size"], date_text, font_ss3_semi)
+
+    writer.write_text(page, color=black)
+
     buffer = io.BytesIO()
-    width, height = 210 * mm, 148 * mm
-    pdf = canvas.Canvas(buffer, pagesize=(width, height))
-    r, g, b = AVART_COLORS["moss"]["RGB"]
-    pdf.setFillColorRGB(r / 255, g / 255, b / 255)
-    pdf.rect(0, 0, width, height, stroke=0, fill=1)
-    lr, lg, lb = AVART_COLORS["light"]["RGB"]
-    pdf.setFillColorRGB(lr / 255, lg / 255, lb / 255)
-    pdf.setFont(TITLE_FONT, 34)
-    pdf.drawCentredString(width / 2, height - 42 * mm, "Gavekort")
-    pdf.setFont("Helvetica", 12)
-    label = f"Gælder én {GIFT_SIZE_LABELS[size]} plakat (fragt betales separat)" if size \
-        else f"Værdi: {avart_money(amount_ore / 100)} DKK"
-    pdf.drawCentredString(width / 2, height - 58 * mm, label)
-    pdf.setFont("Helvetica-Bold", 20)
-    pdf.drawCentredString(width / 2, height / 2 - 12 * mm, code)
-    pdf.setFont("Helvetica", 10)
-    pdf.drawCentredString(width / 2, 34 * mm, "Indløs koden i kurven på avart.dk")
-    pdf.drawCentredString(width / 2, 27 * mm,
-                          f"Kan bruges over flere køb · Gyldig til {expires_at:%d.%m.%Y}")
-    pdf.setFont(TITLE_FONT, 18)
-    pdf.drawCentredString(width / 2, 12 * mm, "avart")
-    pdf.showPage()
-    pdf.save()
+    document.save(buffer, garbage=3, deflate=True)
+    document.close()
     return buffer.getvalue()
 
 
-def fulfil_gift_purchase(session):
-    """Udsteder gavekortet én gang og mailer det til køberen."""
-    purchase_id = int((session.get("metadata") or {}).get("purchase_id", 0))
+def fulfil_gift_purchases(session):
+    """Udsteder ét gavekort pr. købte gavekort og mailer alle PDF'er til køberen."""
+    session_id = session.get("id")
     email = (session.get("customer_details") or {}).get("email")
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT * FROM avart_gift_purchases WHERE id = %s AND stripe_session_id = %s FOR UPDATE",
-                (purchase_id, session.get("id")),
+                "SELECT * FROM avart_gift_purchases WHERE stripe_session_id = %s ORDER BY id FOR UPDATE",
+                (session_id,),
             )
-            purchase = cursor.fetchone()
-            if not purchase:
+            purchases = cursor.fetchall()
+            if not purchases:
                 connection.rollback()
-                return JSONResponse({"error": "Gavekortkøbet blev ikke fundet."}, status_code=404)
-            if session.get("amount_total") != purchase["amount_ore"] or session.get("currency") != "dkk":
+                return {"received": True, "gift_cards": "not_found"}
+            if session.get("currency") != "dkk" or session.get("amount_total") != sum(
+                    int(purchase["amount_ore"]) for purchase in purchases):
                 connection.rollback()
-                return JSONResponse({"error": "Betalingsbeløbet stemmer ikke."}, status_code=400)
+                return {"received": True, "gift_cards": "amount_mismatch"}
 
-            if purchase["status"] == "pending":
+            expires = datetime.now(AVART_TIMEZONE).date() + timedelta(days=365 * GIFT_VALID_YEARS + 1)
+            for purchase in purchases:
+                if purchase["status"] != "pending":
+                    continue
                 code = gift_new_code()
-                expires = datetime.now(AVART_TIMEZONE).date() + timedelta(days=365 * GIFT_VALID_YEARS + 1)
                 cursor.execute(
                     """
                     INSERT INTO avart_gift_cards
                       (purchase_id, code_hash, delivery_code, original_ore, balance_ore, expires_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (purchase_id, gift_code_hash(code), code, purchase["amount_ore"],
+                    (purchase["id"], gift_code_hash(code), code, purchase["amount_ore"],
                      purchase["amount_ore"], expires),
                 )
                 cursor.execute(
                     "UPDATE avart_gift_purchases SET status = 'paid', buyer_email = %s, paid_at = NOW() WHERE id = %s",
-                    (email, purchase_id),
+                    (email, purchase["id"]),
                 )
 
             cursor.execute(
-                "SELECT * FROM avart_gift_cards WHERE purchase_id = %s FOR UPDATE", (purchase_id,))
-            card = cursor.fetchone()
-            if card["delivery_status"] != "pending":
+                "SELECT c.*, p.poster_size, p.reference FROM avart_gift_cards c "
+                "JOIN avart_gift_purchases p ON p.id = c.purchase_id "
+                "WHERE p.stripe_session_id = %s ORDER BY c.id FOR UPDATE",
+                (session_id,),
+            )
+            cards = cursor.fetchall()
+            if not cards:
                 connection.commit()
-                return {"received": True, "gift_card": card["delivery_status"]}
+                return {"received": True, "gift_cards": "not_found"}
+            cards_to_send = [card for card in cards
+                             if card["delivery_status"] in ("pending", "sending")]
+            if not cards_to_send:
+                connection.commit()
+                return {"received": True, "gift_cards": "sent"}
             # Markér før afsendelse, så Stripe-genforsøg ikke sender dubletter.
-            cursor.execute("UPDATE avart_gift_cards SET delivery_status = 'sending' WHERE id = %s", (card["id"],))
+            for card in cards_to_send:
+                cursor.execute("UPDATE avart_gift_cards SET delivery_status = 'sending' WHERE id = %s",
+                               (card["id"],))
         connection.commit()
     except Exception:
         connection.rollback()
-        return JSONResponse({"error": "Gavekortet kunne ikke udstedes."}, status_code=500)
+        return {"received": True, "gift_cards": "error"}
     finally:
         connection.close()
 
     status = "sent"
     try:
-        pdf_bytes = gift_card_pdf(card["delivery_code"], card["original_ore"],
-                                  purchase["poster_size"], card["expires_at"])
+        attachments = []
+        used_filenames = set()
+        for card in cards_to_send:
+            pdf_bytes = gift_card_pdf(card["delivery_code"], card["original_ore"],
+                                      card["poster_size"], card["expires_at"])
+            base = card["poster_size"] or f"{int(card['original_ore']) // 100}kr"
+            filename = f"AVART-gavekort-{base}.pdf"
+            counter = 2
+            while filename in used_filenames:
+                filename = f"AVART-gavekort-{base}-{counter}.pdf"
+                counter += 1
+            used_filenames.add(filename)
+            attachments.append((filename, pdf_bytes))
+
+        codes = "\n".join(card["delivery_code"] for card in cards_to_send)
         send_order_email(
             email,
             "Dit AVART gavekort",
             "Tak for dit køb!\n\n"
-            f"Din gavekortkode er: {card['delivery_code']}\n\n"
-            "Gavekortet er vedhæftet som PDF, så du kan printe det eller sende det videre.\n"
-            "Koden indtastes i kurven på avart.dk. Et eventuelt restbeløb gemmes til næste køb.\n\n"
+            f"Dine gavekortkoder er:\n{codes}\n\n"
+            "Hvert gavekort er vedhæftet som PDF, så du kan printe dem eller sende dem videre.\n"
+            "Koden indtastes i kurven på avart.dk. Et eventuelt restbeløb gemmes til næste køb.\n"
+            f"Gavekortene er gyldige i {GIFT_VALID_YEARS} år.\n\n"
             "Kærlig hilsen\nAVART",
-            attachments=[(f"AVART-gavekort-{purchase['reference']}.pdf", pdf_bytes)],
+            attachments=attachments,
         )
     except Exception as e:
         status = "needs_review"
-        print(f"AVART GIFT EMAIL NEEDS REVIEW: purchase_id={purchase_id} {type(e).__name__}: {e}", flush=True)
+        print(f"AVART GIFT EMAIL NEEDS REVIEW: session_id={session_id} {type(e).__name__}: {e}", flush=True)
 
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE avart_gift_cards SET delivery_status = %s, "
-                "delivery_code = IF(%s = 'sent', NULL, delivery_code) WHERE id = %s",
-                (status, status, card["id"]),
-            )
+            for card in cards_to_send:
+                cursor.execute(
+                    "UPDATE avart_gift_cards SET delivery_status = %s, "
+                    "delivery_code = IF(%s = 'sent', NULL, delivery_code) WHERE id = %s",
+                    (status, status, card["id"]),
+                )
         connection.commit()
     finally:
         connection.close()
-    return {"received": True, "gift_card": status}
+    return {"received": True, "gift_cards": status}
 
 
 @app.post("/stripe/webhook")
@@ -4516,7 +4711,7 @@ async def stripe_webhook(request: Request):
         return {"received": True, "payment": "pending"}
 
     if (session.get("metadata") or {}).get("kind") == "gift_card":
-        return fulfil_gift_purchase(session)
+        return fulfil_gift_purchases(session)
 
     order_number = session.get("client_reference_id")
     session_id = session.get("id")
@@ -4677,6 +4872,17 @@ async def stripe_webhook(request: Request):
             flush=True,
         )
         return {"received": True, "payment": "paid", "customer_email": "needs_review"}
+
+    # Gavekort købt i samme ordre (blandet kurv) udstedes her.
+    try:
+        fulfil_gift_purchases(session)
+        print(f"AVART GIFT FULFILMENT DONE: order_id={order['id']}", flush=True)
+    except Exception as e:
+        print(
+            f"AVART GIFT FULFILMENT NEEDS REVIEW: order_id={order['id']} "
+            f"{type(e).__name__}: {e}",
+            flush=True,
+        )
 
     return {"received": True, "payment": "paid"}
 
