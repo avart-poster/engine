@@ -3757,9 +3757,10 @@ def avart_customer_email_html(order, items, gift_rows=None):
     with open(template_path, encoding="utf-8") as file:
         template = file.read()
     if not items:
-        start = template.index("<!--PRODUCTION_START-->")
-        end = template.index("<!--PRODUCTION_END-->") + len("<!--PRODUCTION_END-->")
-        template = template[:start] + template[end:]
+        for marker in ("PRODUCTION", "SHIPPING", "DELIVERY"):
+            start = template.index("<!--" + marker + "_START-->")
+            end = template.index("<!--" + marker + "_END-->") + len("<!--" + marker + "_END-->")
+            template = template[:start] + template[end:]
     paid_at = order.get("paid_at")
     prod_date, ship_date = avart_schedule(paid_at)
     if isinstance(paid_at, datetime):
