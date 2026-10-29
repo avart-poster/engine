@@ -3756,6 +3756,10 @@ def avart_customer_email_html(order, items, gift_rows=None):
     template_path = os.path.join(os.path.dirname(__file__), "email_templates", "ordrebekraeftelse.html")
     with open(template_path, encoding="utf-8") as file:
         template = file.read()
+    if not items:
+        start = template.index("<!--PRODUCTION_START-->")
+        end = template.index("<!--PRODUCTION_END-->") + len("<!--PRODUCTION_END-->")
+        template = template[:start] + template[end:]
     paid_at = order.get("paid_at")
     prod_date, ship_date = avart_schedule(paid_at)
     if isinstance(paid_at, datetime):
@@ -3766,14 +3770,27 @@ def avart_customer_email_html(order, items, gift_rows=None):
         order_date = ""
     rows = []
     for item in items:
-        size = {"50x70": "500×700 mm", "A3": "297×420 mm", "A2": "420×594 mm", "A1": "594×841 mm"}.get(item["size"], item["size"])
+        size = {"50x70": "50×70"}.get(item["size"], item["size"])
         rows.append('<tr><td style="padding:21px 0 18px">{}</td><td style="padding:21px 0 18px">{}</td><td style="padding:21px 0 18px">1 stk.</td><td align="right" style="padding:21px 0 18px">{}</td></tr>'.format(
             html_escape(str(item["style"]).upper()), html_escape(size), avart_money(item["price_dkk"])))
     rows.extend(gift_rows or [])
     address = ", ".join(filter(None, [order.get("shipping_address"),
                  " ".join(filter(None, [str(order.get("shipping_postal_code") or ""), order.get("shipping_city") or ""]))]))
     total = (order["amount_paid_ore"] / 100) if order.get("amount_paid_ore") is not None else float(order["total_dkk"])
+    gift_deduction = int(order.get("gift_card_ore") or 0) / 100
+    deduction_row = (
+        '<tr><td colspan="3" style="padding:16px 0">Gavekort</td>'
+        '<td align="right" style="padding:16px 0">−{}</td></tr>'.format(avart_money(gift_deduction))
+        if gift_deduction else ""
+    )
+    intro = "Vi har modtaget din ordre og lægger din plakat i kø! Snart er dit billede på vej fra idé til virkelighed."
+    if not items:
+        intro = ("Hvert gavekort er vedhæftet som PDF, så du kan printe dem eller sende dem videre. "
+                 "Koden indtastes i kurven på avart.dk. Et eventuelt restbeløb gemmes til næste køb. "
+                 f"Gavekortene er gyldige i {GIFT_VALID_YEARS} år.")
     substitutions = {
+        "INTRO_TEXT": intro, "PAYMENT_STATUS": "Betalt med Stripe",
+        "GIFT_DEDUCTION_ROW": deduction_row,
         "PRODUCTION_DATE": prod_date, "SHIPPING_DATE": ship_date,
         "ORDER_NUMBER": order["order_number"], "ORDER_DATE": order_date,
         "ITEM_ROWS": "".join(rows), "SHIPPING_PRICE": avart_money(order["shipping_dkk"]),
@@ -3782,14 +3799,54 @@ def avart_customer_email_html(order, items, gift_rows=None):
         "SHIPPING_ADDRESS": address,
     }
     for key, value in substitutions.items():
-        template = template.replace("{{" + key + "}}", value if key == "ITEM_ROWS" else html_escape(str(value)))
+        template = template.replace("{{" + key + "}}", value if key in ("ITEM_ROWS", "GIFT_DEDUCTION_ROW") else html_escape(str(value)))
     # Encode the subject in the mailto URL, including the current order number.
     template = template.replace("subject=Sp%C3%B8rgsm%C3%A5l%20til%20ordre%20" + html_escape(order["order_number"]),
         "subject=" + quote("Spørgsmål til ordre " + order["order_number"]))
     return template
 
 
-def send_customer_confirmation(order_id):
+def avart_gift_item_rows(gifts):
+    rows = []
+    for gift in gifts:
+        size = gift.get("poster_size") or ""
+        amount = int(gift.get("amount_ore", gift.get("original_ore", 0))) / 100
+        rows.append('<tr><td style="padding:21px 0 18px">GAVEKORT</td>'
+                    '<td style="padding:21px 0 18px">{}</td>'
+                    '<td style="padding:21px 0 18px">1 stk.</td>'
+                    '<td align="right" style="padding:21px 0 18px">{}</td></tr>'.format(
+                        html_escape(str(size)), avart_money(amount)))
+    return rows
+
+
+def send_avart_confirmation_message(order, items, gift_rows=None, attachments=None):
+    """Samme HTML og vedhæftninger for plakater, gavekort og blandede ordrer."""
+    html = avart_customer_email_html(order, items, gift_rows)
+    terms = avart_download_terms_pdf()
+    logo_path = os.path.join(os.path.dirname(__file__), "email_templates", "avart-logo.png")
+    with open(logo_path, "rb") as file:
+        logo = file.read()
+    message = EmailMessage()
+    message["From"] = os.environ["SMTP_USER"]
+    message["To"] = order["customer_email"]
+    message["Subject"] = f"AVART – Ordrebekræftelse {order['order_number']}"
+    message.set_content(f"Tak for din bestilling hos AVART. Ordrenummer: {order['order_number']}. "
+                        "Handelsbetingelser og eventuelle gavekort er vedhæftet.")
+    message.add_alternative(html, subtype="html")
+    html_part = message.get_payload()[-1]
+    html_part.add_related(logo, maintype="image", subtype="png", cid="<avart_logo>", filename="avart-logo.png")
+    if items:
+        html_part.add_related(avart_poster_preview(items), maintype="image", subtype="png",
+                              cid="<avart_preview>", filename="plakat-preview.png")
+    message.add_attachment(terms, maintype="application", subtype="pdf", filename="AVART-Handelsbetingelser.pdf")
+    for filename, data in (attachments or []):
+        message.add_attachment(data, maintype="application", subtype="pdf", filename=filename)
+    with smtplib.SMTP_SSL(os.environ["SMTP_HOST"], int(os.environ["SMTP_PORT"]), timeout=30) as smtp:
+        smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+        smtp.send_message(message)
+
+
+def send_customer_confirmation(order_id, gift_attachments=None):
     """Send kundemail med DB-lås, så samtidige webhook-kald ikke sender dubletter.
 
     SMTP og database er ikke én transaktion. Ved en usikker SMTP/DB-fejl
@@ -3810,6 +3867,15 @@ def send_customer_confirmation(order_id):
             if not order or order["payment_status"] != "paid":
                 raise ValueError("Kun betalte ordrer kan bekræftes")
             if order.get("customer_email_sent_at"):
+                # Ældre blandede ordrer kan allerede have fået kvitteringen,
+                # men stadig mangle gavekort-PDF'erne. De må ikke gå tabt.
+                if gift_attachments:
+                    cursor.execute(
+                        "SELECT poster_size, amount_ore FROM avart_gift_purchases "
+                        "WHERE stripe_session_id = %s ORDER BY id",
+                        (order["stripe_session_id"],),
+                    )
+                    send_avart_confirmation_message(order, [], avart_gift_item_rows(cursor.fetchall()), gift_attachments)
                 return
             if not order.get("customer_email"):
                 raise ValueError("Kundens e-mail mangler")
@@ -3827,61 +3893,12 @@ def send_customer_confirmation(order_id):
                     "WHERE stripe_session_id = %s ORDER BY id",
                     (order["stripe_session_id"],),
                 )
-                for gift in cursor.fetchall():
-                    if gift["poster_size"]:
-                        gift_label = "GAVEKORT – " + GIFT_SIZE_LABELS[gift["poster_size"]]
-                    else:
-                        gift_label = "GAVEKORT – " + avart_money(gift["amount_ore"] / 100) + " kr."
-                    gift_rows.append(
-                        '<tr><td style="padding:21px 0 18px">{}</td>'
-                        '<td style="padding:21px 0 18px"></td>'
-                        '<td style="padding:21px 0 18px">1 stk.</td>'
-                        '<td align="right" style="padding:21px 0 18px">{}</td></tr>'.format(
-                            html_escape(gift_label),
-                            avart_money(gift["amount_ore"] / 100),
-                        )
-                    )
+                gift_rows = avart_gift_item_rows(cursor.fetchall())
 
-        if not items:
+        if not items and not gift_rows:
             raise ValueError("Ordren har ingen produkter")
 
-        html = avart_customer_email_html(order, items, gift_rows)
-        terms = avart_download_terms_pdf()
-        preview = avart_poster_preview(items)
-        logo_path = os.path.join(
-            os.path.dirname(__file__), "email_templates", "avart-logo.png"
-        )
-        with open(logo_path, "rb") as file:
-            logo = file.read()
-
-        message = EmailMessage()
-        message["From"] = os.environ["SMTP_USER"]
-        message["To"] = order["customer_email"]
-        message["Subject"] = f"AVART – Ordrebekræftelse {order['order_number']}"
-        message.set_content(
-            f"Tak for din bestilling hos AVART. Ordrenummer: "
-            f"{order['order_number']}. Handelsbetingelser er vedhæftet."
-        )
-        message.add_alternative(html, subtype="html")
-        html_part = message.get_payload()[-1]
-        html_part.add_related(
-            logo, maintype="image", subtype="png", cid="<avart_logo>",
-            filename="avart-logo.png",
-        )
-        html_part.add_related(
-            preview, maintype="image", subtype="png", cid="<avart_preview>",
-            filename="plakat-preview.png",
-        )
-        message.add_attachment(
-            terms, maintype="application", subtype="pdf",
-            filename="AVART-Handelsbetingelser.pdf",
-        )
-
-        with smtplib.SMTP_SSL(
-            os.environ["SMTP_HOST"], int(os.environ["SMTP_PORT"]), timeout=30
-        ) as smtp:
-            smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
-            smtp.send_message(message)
+        send_avart_confirmation_message(order, items, gift_rows, gift_attachments)
 
         with connection.cursor() as cursor:
             cursor.execute(
@@ -4374,7 +4391,7 @@ def gift_card_pdf(code, amount_ore, size, expires_at):
     return buffer.getvalue()
 
 
-def fulfil_gift_purchases(session):
+def fulfil_gift_purchases(session, order_id=None):
     """Udsteder ét gavekort pr. købte gavekort og mailer alle PDF'er til køberen."""
     session_id = session.get("id")
     email = (session.get("customer_details") or {}).get("email")
@@ -4389,8 +4406,8 @@ def fulfil_gift_purchases(session):
             if not purchases:
                 connection.rollback()
                 return {"received": True, "gift_cards": "not_found"}
-            if session.get("currency") != "dkk" or session.get("amount_total") != sum(
-                    int(purchase["amount_ore"]) for purchase in purchases):
+            if session.get("currency") != "dkk" or (order_id is None and session.get("amount_total") != sum(
+                    int(purchase["amount_ore"]) for purchase in purchases)):
                 connection.rollback()
                 return {"received": True, "gift_cards": "amount_mismatch"}
 
@@ -4414,7 +4431,7 @@ def fulfil_gift_purchases(session):
                 )
 
             cursor.execute(
-                "SELECT c.*, p.poster_size, p.reference FROM avart_gift_cards c "
+                "SELECT c.*, p.poster_size, p.reference, p.paid_at FROM avart_gift_cards c "
                 "JOIN avart_gift_purchases p ON p.id = c.purchase_id "
                 "WHERE p.stripe_session_id = %s ORDER BY c.id FOR UPDATE",
                 (session_id,),
@@ -4455,18 +4472,21 @@ def fulfil_gift_purchases(session):
             used_filenames.add(filename)
             attachments.append((filename, pdf_bytes))
 
-        codes = "\n".join(card["delivery_code"] for card in cards_to_send)
-        send_order_email(
-            email,
-            "Dit AVART gavekort",
-            "Tak for dit køb!\n\n"
-            f"Dine gavekortkoder er:\n{codes}\n\n"
-            "Hvert gavekort er vedhæftet som PDF, så du kan printe dem eller sende dem videre.\n"
-            "Koden indtastes i kurven på avart.dk. Et eventuelt restbeløb gemmes til næste køb.\n"
-            f"Gavekortene er gyldige i {GIFT_VALID_YEARS} år.\n\n"
-            "Kærlig hilsen\nAVART",
-            attachments=attachments,
-        )
+        if order_id is not None:
+            send_customer_confirmation(order_id, gift_attachments=attachments)
+        else:
+            customer = session.get("customer_details") or {}
+            address = customer.get("address") or {}
+            order = {
+                "order_number": cards[0]["reference"], "paid_at": cards[0].get("paid_at"),
+                "customer_email": email, "customer_name": customer.get("name") or "",
+                "shipping_address": ", ".join(filter(None, [address.get("line1"), address.get("line2")])),
+                "shipping_postal_code": address.get("postal_code"), "shipping_city": address.get("city"),
+                "shipping_dkk": 0, "total_dkk": session["amount_total"] / 100,
+                "amount_paid_ore": session["amount_total"], "gift_card_ore": 0,
+            }
+            send_avart_confirmation_message(order, [], avart_gift_item_rows(cards), attachments)
+
     except Exception as e:
         status = "needs_review"
         print(f"AVART GIFT EMAIL NEEDS REVIEW: session_id={session_id} {type(e).__name__}: {e}", flush=True)
@@ -4689,29 +4709,16 @@ async def stripe_webhook(request: Request):
         )   
 
     
+    # Gavekort-PDF'er og ordrebekræftelse sendes samlet ved blandede køb.
     try:
-        send_customer_confirmation(int(order["id"]))
+        gift_result = fulfil_gift_purchases(session, order_id=int(order["id"]))
+        if gift_result.get("gift_cards") == "not_found":
+            send_customer_confirmation(int(order["id"]))
+        elif gift_result.get("gift_cards") != "sent":
+            return {"received": True, "payment": "paid", "customer_email": "needs_review"}
     except Exception as e:
-        # Betalingen er allerede registreret. Stripe-retries må ikke
-        # automatisk gensende en mail med usikker SMTP-status.
-        # Undersøg log og kundemail før et eventuelt manuelt genforsøg.
-        print(
-            f"AVART CUSTOMER EMAIL NEEDS REVIEW: order_id={order['id']} "
-            f"{type(e).__name__}: {e}",
-            flush=True,
-        )
+        print(f"AVART CUSTOMER EMAIL NEEDS REVIEW: order_id={order['id']} {type(e).__name__}: {e}", flush=True)
         return {"received": True, "payment": "paid", "customer_email": "needs_review"}
-
-    # Gavekort købt i samme ordre (blandet kurv) udstedes her.
-    try:
-        fulfil_gift_purchases(session)
-        print(f"AVART GIFT FULFILMENT DONE: order_id={order['id']}", flush=True)
-    except Exception as e:
-        print(
-            f"AVART GIFT FULFILMENT NEEDS REVIEW: order_id={order['id']} "
-            f"{type(e).__name__}: {e}",
-            flush=True,
-        )
 
     return {"received": True, "payment": "paid"}
 
