@@ -1737,6 +1737,24 @@ def generate_poster_pdf(
             pass
 
 
+def poster_group_layout(person_widths, available_width):
+    """Use one shared width X, step X/2, and scale only the whole group.
+
+    X is the widest height-adjusted contour's placement width. Narrower
+    contours are centered in that same slot, never stretched independently.
+    """
+    if not person_widths or min(person_widths) <= 0 or available_width <= 0:
+        raise ValueError("Person widths and available width must be positive")
+    slot_width = max(person_widths)
+    group_width = slot_width * (1 + (len(person_widths) - 1) / 2)
+    group_scale = min(1.0, available_width / group_width)
+    slot_width *= group_scale
+    group_width *= group_scale
+    centers = [slot_width / 2 + index * slot_width / 2
+               for index in range(len(person_widths))]
+    return group_scale, group_width, centers
+
+
 def generate_multi_poster_pdf(
     persons: list,
     name: str,
@@ -1904,98 +1922,16 @@ def generate_multi_poster_pdf(
 
 
     # ------------------------------------------------
-    # ANTAL PERSONER
-    # ------------------------------------------------
-
-       # ------------------------------------------------
-    # ANTAL PERSONER / VANDRET GRID
+    # ANTAL PERSONER / FÆLLES VANDRET GRID
     # ------------------------------------------------
 
     count = len(persons)
-
     if count < 1 or count > 6:
-        raise ValueError(
-            "This version supports 1 to 6 persons"
-        )
-
-    # ------------------------------------------------
-    # PORTRAIT: 1-2 personer
-    # ------------------------------------------------
-
-    if orientation == "portrait":
-
-        if count == 1:
-            center_positions = [
-                0.50,
-            ]
-
-        elif count == 2:
-            center_positions = [
-                0.375,
-                0.625,
-            ]
-
-        else:
-            raise ValueError(
-                "Portrait supports max 2 persons"
-            )
-
-    # ------------------------------------------------
-    # LANDSCAPE: 3-6 personer
-    # ------------------------------------------------
-
-    else:
-
-        side_margins_mm = {
-            3: 125,
-            4: 90,
-            5: 50,
-            6: 50,
-        }
-
-        if count not in side_margins_mm:
-            raise ValueError(
-                "Landscape supports 3 to 6 persons"
-            )
-
-        side_margin = max(
-            side_margins_mm[count],
-            size_side_margins_mm[size],
-        ) * mm
-
-        # Fordel personernes centre jævnt mellem
-        # venstre og højre designmargin.
-        #
-        # Vi bruger marginen som gruppens ydre ramme.
-        # Den individuelle side-sikkerhed længere nede
-        # beskytter stadig mod at hår osv. bliver skåret af.
-
-        usable_width = (
-            width - (2 * side_margin)
-        )
-
-        if count == 1:
-            center_positions = [
-                0.50,
-            ]
-
-        else:
-            center_positions = []
-
-            for i in range(count):
-
-                position_x = (
-                    side_margin
-                    + (
-                        usable_width
-                        * i
-                        / (count - 1)
-                    )
-                )
-
-                center_positions.append(
-                    position_x / width
-                )
+        raise ValueError("This version supports 1 to 6 persons")
+    if orientation == "portrait" and count > 2:
+        raise ValueError("Portrait supports max 2 persons")
+    if orientation != "portrait" and count < 3:
+        raise ValueError("Landscape supports 3 to 6 persons")
 
     # ------------------------------------------------
     # OPRET PDF
@@ -2041,6 +1977,8 @@ def generate_multi_poster_pdf(
     )
 
     temporary_files = []
+    prepared_persons = []
+    person_widths = []
 
     try:
 
@@ -2153,145 +2091,28 @@ def generate_multi_poster_pdf(
 
             draw_w = max_x - min_x
 
-            # ------------------------------------------------
-            # BEGRÆNS SILHUETTENS BREDDE TIL DESIGNMARGINERNE
-            # ------------------------------------------------
-            
-            minimum_side_margin = size_side_margins_mm[size] * mm
-            maximum_width = width - (2 * minimum_side_margin)
-            
-            if draw_w > maximum_width:
-                width_scale = maximum_width / draw_w
-            
-                drawing.scale(
-                    width_scale,
-                    width_scale,
-                )
-            
+            # Prepare every height-adjusted contour before placing the group.
+            prepared_persons.append((drawing, silhouette_scale, flipped))
+            person_widths.append(draw_w)
+
+        minimum_side_margin = size_side_margins_mm[size] * mm
+        maximum_group_width = width - 2 * minimum_side_margin
+        group_scale, group_width, group_centers = poster_group_layout(
+            person_widths, maximum_group_width,
+        )
+        group_left = (width - group_width) / 2
+
+        for index, (drawing, silhouette_scale, flipped) in enumerate(prepared_persons):
+            if group_scale < 1:
+                drawing.scale(group_scale, group_scale)
                 set_stroke_width_recursive(
-                    drawing,
-                    stroke_width / (silhouette_scale * width_scale),
+                    drawing, stroke_width / (silhouette_scale * group_scale),
                 )
 
-                min_x, min_y, max_x, max_y = drawing.getBounds()
-                draw_w = max_x - min_x
-
-
-            # --------------------------------------------
-            # VANDRET PLACERING
-            # --------------------------------------------
-
-            if orientation == "landscape":
-
-                # ----------------------------------------
-                # 3 PERSONER
-                # ----------------------------------------
-                # Yderpersonernes yderkant følger
-                # designmarginen. Midterpersonen centreres.
-
-                if count == 3:
-
-                    if index == 0:
-                        x = side_margin - min_x
-
-                    elif index == 1:
-                        target_center_x = width / 2
-
-                        x = (
-                            target_center_x
-                            - (draw_w / 2)
-                            - min_x
-                        )
-
-                    else:
-                        x = (
-                            width
-                            - side_margin
-                            - max_x
-                        )
-
-                # ----------------------------------------
-                # 4–6 PERSONER
-                # ----------------------------------------
-    
-                else:
-    
-                    # Første person:
-                    # venstre yderkant = designmargin
-                    if index == 0:
-    
-                        x = (
-                            side_margin
-                            - min_x
-                        )
-    
-                    # Sidste person:
-                    # højre yderkant = designmargin
-                    elif index == count - 1:
-    
-                        x = (
-                            width
-                            - side_margin
-                            - max_x
-                        )
-    
-                    # Personerne imellem fordeles jævnt
-                    # mellem designmarginerne
-                    else:
-    
-                        usable_width = (
-                            width - (2 * side_margin)
-                        )
-    
-                        step = (
-                            usable_width / (count - 1)
-                        )
-    
-                        target_center_x = (
-                            side_margin
-                            + (step * index)
-                        )
-    
-                        x = (
-                            target_center_x
-                            - (draw_w / 2)
-                            - min_x
-                        )
-
-            else:
-
-                # ----------------------------------------
-                # PORTRAIT: 1–2 PERSONER
-                # ----------------------------------------
-
-                target_center_x = (
-                    width
-                    * center_positions[index]
-                )
-
-                x = (
-                    target_center_x
-                    - (draw_w / 2)
-                    - min_x
-                )
-      
-
-            # --------------------------------------------
-            # SIKKERHED MOD BESKÅRING I SIDERNE
-            # --------------------------------------------
-
-            side_margin_safety = size_side_margins_mm[size] * mm
-
-            left_edge = x + min_x
-            right_edge = x + max_x
-
-            if left_edge < side_margin_safety:
-                x += side_margin_safety - left_edge
-
-            right_edge = x + max_x
-
-            if right_edge > width - side_margin_safety:
-                x -= right_edge - (width - side_margin_safety)
+            min_x, min_y, max_x, max_y = drawing.getBounds()
+            draw_w = max_x - min_x
+            target_center_x = group_left + group_centers[index]
+            x = target_center_x - draw_w / 2 - min_x
 
             # --------------------------------------------
             # ALTID FAST I BUNDEN
@@ -4908,4 +4729,5 @@ async def get_checkout_session(session_id: str = Query(...)):
             {"error": str(e)},
             status_code=400
         )
+
 
