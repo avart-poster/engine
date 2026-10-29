@@ -1574,6 +1574,8 @@ def generate_poster_pdf(
             reference_height_mm = 500
         
             reference_top_positions_mm = {
+                -4: 260,
+                -3: 220,
                 -2: 180,
                 -1: 150,
                 0: 120,
@@ -1585,6 +1587,8 @@ def generate_poster_pdf(
             reference_height_mm = 700
         
             reference_top_positions_mm = {
+                -4: 290,
+                -3: 250,
                 -2: 210,
                 -1: 185,
                 0: 160,
@@ -1601,7 +1605,7 @@ def generate_poster_pdf(
         
         if scale_level not in top_positions_mm:
             raise ValueError(
-                "scale_level must be between -2 and 2"
+                "scale_level must be between -4 and 2"
             )
         
         target_top_mm = top_positions_mm[scale_level]
@@ -1877,6 +1881,8 @@ def generate_multi_poster_pdf(
         reference_height_mm = 500
     
         reference_top_positions_mm = {
+            -4: 260,
+            -3: 220,
             -2: 180,
             -1: 150,
             0: 120,
@@ -1888,6 +1894,8 @@ def generate_multi_poster_pdf(
         reference_height_mm = 700
     
         reference_top_positions_mm = {
+            -4: 290,
+            -3: 250,
             -2: 210,
             -1: 185,
             0: 160,
@@ -1994,7 +2002,7 @@ def generate_multi_poster_pdf(
 
             if scale_level not in top_positions_mm:
                 raise ValueError(
-                    "scale_level must be between -2 and 2"
+                    "scale_level must be between -4 and 2"
                 )
 
             # Midlertidig SVG
@@ -3407,7 +3415,7 @@ async def create_checkout_session(data: dict):
                 if not verify_svg(person["svg"], person.get("svg_sig")):
                     raise ValueError("Silhuetten kunne ikke godkendes. Upload billedet igen.")
 
-                if person.get("scale_level", 0) not in (-2, -1, 0, 1, 2):
+                if person.get("scale_level", 0) not in (-4, -3, -2, -1, 0, 1, 2):
                     raise ValueError("Ugyldig skalering.")
 
                 if not isinstance(person.get("flipped", False), bool):
