@@ -3362,7 +3362,7 @@ def avart_campaign(code, subtotal_ore):
     if not coupon.get('valid') or any(int(v) <= now for v in [promo.get('expires_at'), coupon.get('redeem_by')] if v is not None):
         raise ValueError('Rabatkoden er udløbet.')
     deadlines = [int(v) for v in (promo.get('expires_at'), coupon.get('redeem_by')) if v is not None]
-    if deadlines and min(deadlines) < now + 1860:
+    if deadlines and min(deadlines) < now + 2160:
         raise ValueError('Rabatkoden udløber for snart til at starte en ny betaling.')
     starts = (coupon.get('metadata') or {}).get('avart_starts_at')
     if starts:
@@ -3989,7 +3989,7 @@ async def create_checkout_session(data: dict):
 
             cancel_url="https://avart.dk/?payment=cancel&session_id={CHECKOUT_SESSION_ID}",
 
-            expires_at=int(__import__("time").time()) + 1800,
+            expires_at=int(__import__("time").time()) + 2100,
         )
 
         connection = get_db_connection()
@@ -4700,7 +4700,7 @@ async def gift_card_checkout(data: dict):
             billing_address_collection="auto",
             success_url="https://avart.dk/?payment=success&gift=1&session_id={CHECKOUT_SESSION_ID}",
             cancel_url="https://avart.dk/?payment=cancel&session_id={CHECKOUT_SESSION_ID}#gavekort",
-            expires_at=int(__import__("time").time()) + 1800,
+            expires_at=int(__import__("time").time()) + 2100,
         )
         connection = get_db_connection()
         try:
@@ -4715,6 +4715,7 @@ async def gift_card_checkout(data: dict):
             connection.close()
         return {"url": session.url}
     except Exception:
+        __import__("logging").exception("AVART gift checkout creation or binding failed")
         return JSONResponse({"error": "Betalingen kunne ikke oprettes. Prøv igen."}, status_code=500)
 
 
