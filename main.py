@@ -4020,14 +4020,23 @@ async def create_checkout_session(data: dict):
             "order_number": order_number,
         }
 
-    except Exception:
-        # Reconcile an ambiguous Stripe timeout with the same idempotency key
-        # before releasing anything. A lost response may still represent a live
-        # payment. Conservatively retain holds on creation errors.
+    except Exception as error:
+        __import__("logging").exception("AVART poster checkout creation failed")
+        # Stripe svarede klart nej (4xx): der findes ingen betalingsside, så
+        # gavekort- og rabatreservationen frigives straks. Ved timeout/ukendt
+        # svar beholdes reservationen, til afstemningen har bekræftet fravær.
+        status = getattr(error, 'http_status', None) or 0
+        rejected = 400 <= int(status) < 500 and status != 409
         try:
             connection = get_db_connection()
             with connection.cursor() as cursor:
-                cursor.execute("UPDATE orders SET order_status = 'needs_review' WHERE id = %s", (order_id,))
+                if rejected:
+                    release_gift_reservation(cursor, order_id)
+                    avart_campaign_status(cursor, order_number, 'released')
+                    cursor.execute("UPDATE avart_payment_attempts SET status = 'failed' WHERE reference = %s AND stripe_session_id IS NULL", (order_number,))
+                    cursor.execute("UPDATE orders SET order_status = 'failed' WHERE id = %s", (order_id,))
+                else:
+                    cursor.execute("UPDATE orders SET order_status = 'needs_review' WHERE id = %s", (order_id,))
             connection.commit()
         except Exception:
             pass
