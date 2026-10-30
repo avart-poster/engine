@@ -3330,6 +3330,363 @@ async def poster_preview(
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 
+# AVART campaigns: original Stripe codes are validated; combined Checkout coupons
+# carry campaign + gift deductions. Local locked usage records enforce the original
+# code/coupon limits because Stripe cannot stack a stored-value payment with a coupon.
+def avart_object(value):
+    if hasattr(value, 'to_dict_recursive'):
+        return value.to_dict_recursive()
+    if hasattr(value, 'to_dict'):
+        return value.to_dict()
+    return dict(value or {})
+
+
+def avart_campaign(code, subtotal_ore):
+    code = str(code or '').strip()
+    if not code:
+        return None
+    if len(code) > 100:
+        raise ValueError('Rabatkoden er ugyldig.')
+    import time
+    found = avart_object(stripe.PromotionCode.list(code=code, active=True, limit=100))
+    matches = [avart_object(p) for p in found.get('data', []) if str(p.get('code', '')).casefold() == code.casefold()]
+    if len(matches) != 1:
+        raise ValueError('Rabatkoden findes ikke eller er ikke aktiv.')
+    promo = matches[0]
+    coupon_ref = promo.get('coupon') or (promo.get('promotion') or {}).get('coupon')
+    coupon_id = coupon_ref if isinstance(coupon_ref, str) else avart_object(coupon_ref).get('id')
+    if not coupon_id:
+        raise ValueError('Denne rabatkode kan ikke bruges til denne bestilling.')
+    coupon = avart_object(stripe.Coupon.retrieve(coupon_id))
+    now = int(time.time())
+    if not coupon.get('valid') or any(int(v) <= now for v in [promo.get('expires_at'), coupon.get('redeem_by')] if v is not None):
+        raise ValueError('Rabatkoden er udløbet.')
+    deadlines = [int(v) for v in (promo.get('expires_at'), coupon.get('redeem_by')) if v is not None]
+    if deadlines and min(deadlines) < now + 1860:
+        raise ValueError('Rabatkoden udløber for snart til at starte en ny betaling.')
+    starts = (coupon.get('metadata') or {}).get('avart_starts_at')
+    if starts:
+        try:
+            if int(starts) > now:
+                raise ValueError('Rabatkoden er ikke startet endnu.')
+        except (TypeError, OverflowError):
+            raise ValueError('Rabatkoden kunne ikke kontrolleres.')
+    restrictions = promo.get('restrictions') or {}
+    # Fail closed instead of silently bypassing unsupported Stripe restrictions.
+    if promo.get('customer') or promo.get('customer_account') or restrictions.get('first_time_transaction') or (coupon.get('applies_to') or {}).get('products'):
+        raise ValueError('Denne rabatkode har begrænsninger, som ikke kan bruges i denne kurv.')
+    minimum = int(restrictions.get('minimum_amount') or 0)
+    if minimum and (restrictions.get('minimum_amount_currency') != 'dkk' or subtotal_ore < minimum):
+        raise ValueError('Kurvens beløb opfylder ikke rabatkodens minimumskøb.')
+    if coupon.get('percent_off') is not None:
+        from decimal import Decimal, ROUND_HALF_UP
+        percent = Decimal(str(coupon['percent_off']))
+        if not 0 < percent <= 100:
+            raise ValueError('Rabatkoden er ugyldig.')
+        discount = int((Decimal(subtotal_ore) * percent / 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    else:
+        amount = coupon.get('amount_off')
+        if amount is None or coupon.get('currency') != 'dkk' or int(amount) <= 0:
+            raise ValueError('Rabatkoden skal være i danske kroner.')
+        discount = int(amount)
+    for obj in (promo, coupon):
+        limit = obj.get('max_redemptions')
+        if limit is not None and int(obj.get('times_redeemed') or 0) >= int(limit):
+            raise ValueError('Rabatkoden er brugt op.')
+    return dict(promo_id=promo['id'], coupon_id=coupon['id'], code=promo['code'],
+                discount_ore=min(subtotal_ore, discount), promo=promo, coupon=coupon,
+                deadline=min(deadlines) if deadlines else None)
+
+
+def avart_discount_allocation(amounts, discount_ore):
+    """Allocate one fixed/percentage total across items, sum exact to the cent."""
+    total = sum(amounts)
+    if not total:
+        return [0 for _ in amounts]
+    discount_ore = min(total, max(0, int(discount_ore)))
+    cuts = [discount_ore * amount // total for amount in amounts]
+    residual = discount_ore - sum(cuts)
+    order = sorted(range(len(amounts)), key=lambda i: (discount_ore * amounts[i]) % total, reverse=True)
+    for i in order[:residual]:
+        cuts[i] += 1
+    return cuts
+
+
+def avart_quote_items(items):
+    if not isinstance(items, list) or not 1 <= len(items) <= 20:
+        raise ValueError('Kurven er tom eller ugyldig.')
+    amounts, posters = [], []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError('Kurven er ugyldig.')
+        is_poster = item.get('type') != 'gift'
+        if is_poster:
+            size = str(item.get('size') or '').upper().replace('50X70', '50x70')
+            if size not in GIFT_SIZE_PRICES:
+                raise ValueError('Ugyldig plakatstørrelse.')
+            amount = GIFT_SIZE_PRICES[size] * 100
+        else:
+            amount, _ = gift_amount_from_request({'size': item.get('size'), 'amount': item.get('price')})
+        amounts.append(amount)
+        posters.append(is_poster)
+    return amounts, posters
+
+
+def avart_price_breakdown(amounts, posters, campaign, balance_ore=0):
+    discount = int((campaign or {}).get('discount_ore') or 0)
+    cuts = avart_discount_allocation(amounts, discount)
+    poster_net = sum(amount - cut for amount, cut, poster in zip(amounts, cuts, posters) if poster)
+    gift = min(max(0, int(balance_ore)), poster_net)
+    shipping = 4900 if any(posters) else 0
+    return dict(subtotal_ore=sum(amounts), discount_ore=discount, poster_net_ore=poster_net,
+                gift_ore=gift, shipping_ore=shipping, total_ore=sum(amounts)-discount-gift+shipping,
+                gift_remaining_ore=max(0, int(balance_ore))-gift)
+
+
+def avart_reserve_campaign(cursor, campaign, reference):
+    if not campaign:
+        return
+    # Consistent coupon-before-promotion locks cover limits shared by several codes.
+    for kind, obj in [('coupon', campaign['coupon']), ('promotion', campaign['promo'])]:
+        key = kind + ':' + obj['id']
+        cursor.execute('INSERT IGNORE INTO avart_campaign_locks (scope_key) VALUES (%s)', (key,))
+        cursor.execute('SELECT scope_key FROM avart_campaign_locks WHERE scope_key = %s FOR UPDATE', (key,))
+        cursor.fetchone()
+    for column, obj in [('coupon_id', campaign['coupon']), ('promo_id', campaign['promo'])]:
+        limit = obj.get('max_redemptions')
+        if limit is None:
+            continue
+        cursor.execute('SELECT COUNT(*) AS used FROM avart_campaign_uses WHERE ' + column + " = %s AND status IN ('active', 'spent')", (obj['id'],))
+        if int(cursor.fetchone()['used']) + int(obj.get('times_redeemed') or 0) >= int(limit):
+            raise ValueError('Rabatkoden er brugt op.')
+    cursor.execute("INSERT INTO avart_campaign_uses (reference, promo_id, coupon_id, code, amount_ore, status) VALUES (%s,%s,%s,%s,%s,'active')",
+                   (reference, campaign['promo_id'], campaign['coupon_id'], campaign['code'], campaign['discount_ore']))
+
+
+def avart_campaign_status(cursor, reference, status):
+    if status == 'spent':
+        cursor.execute('SELECT status FROM avart_campaign_uses WHERE reference = %s FOR UPDATE', (reference,))
+        row = cursor.fetchone()
+        if row and row['status'] not in ('active', 'spent'):
+            raise ValueError('Rabatbetalingen kræver kontrol.')
+    cursor.execute("UPDATE avart_campaign_uses SET status = %s WHERE reference = %s AND status = 'active'", (status, reference))
+
+
+def avart_payment_attempt(cursor, reference, subtotal, discount, gift, shipping):
+    cursor.execute("INSERT INTO avart_payment_attempts (reference, subtotal_ore, discount_ore, gift_ore, shipping_ore, expected_total_ore, currency, status) VALUES (%s,%s,%s,%s,%s,%s,'dkk','creating')",
+                   (reference, subtotal, discount, gift, shipping, subtotal-discount-gift+shipping))
+
+
+def avart_save_attempt(reference, **values):
+    allowed = {'request_json', 'stripe_session_id', 'status'}
+    if not values or not set(values) <= allowed:
+        raise ValueError('Invalid attempt fields')
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('UPDATE avart_payment_attempts SET ' + ', '.join(key+' = %s' for key in values) + ' WHERE reference = %s', tuple(values.values()) + (reference,))
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def avart_release_attempt(session):
+    if session.get('status') != 'expired':
+        return False
+    session_id = session.get('id')
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT reference FROM avart_payment_attempts WHERE stripe_session_id = %s FOR UPDATE', (session_id,))
+            attempt = cursor.fetchone()
+            if not attempt:
+                connection.rollback()
+                return False
+            reference = attempt['reference']
+            # Coupon/gift ownership is determined by local Session binding, not input metadata.
+            cursor.execute('SELECT id FROM orders WHERE stripe_session_id = %s', (session_id,))
+            order = cursor.fetchone()
+            if order:
+                release_gift_reservation(cursor, order['id'])
+            avart_campaign_status(cursor, reference, 'released')
+            cursor.execute("UPDATE avart_payment_attempts SET status = 'expired' WHERE reference = %s AND status != 'paid'", (reference,))
+        connection.commit()
+        return True
+    finally:
+        connection.close()
+
+
+def avart_reconcile_payments():
+    """Recover lost responses/terminal expirations on ordinary requests, bounded work.
+    No balances are released merely because a local timestamp elapsed.
+    """
+    import time
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT * FROM avart_payment_attempts WHERE status IN ('creating','open','needs_review') AND updated_at < NOW() - INTERVAL 60 SECOND ORDER BY updated_at LIMIT 5")
+            attempts = cursor.fetchall()
+    finally:
+        connection.close()
+    for attempt in attempts:
+        try:
+            reference = attempt['reference']
+            session = None
+            if attempt.get('stripe_session_id'):
+                session = avart_object(stripe.checkout.Session.retrieve(attempt['stripe_session_id']))
+            elif attempt.get('request_json'):
+                request = json.loads(attempt['request_json'])
+                if int(request['expires_at']) > int(time.time()) + 1800:
+                    session = avart_object(stripe.checkout.Session.create(**request))
+                else:
+                    # Complete bounded scan is required before confirming absence.
+                    lower = int(attempt['created_at'].replace(tzinfo=ZoneInfo('UTC')).timestamp()) - 300
+                    cursor_id = None
+                    complete = False
+                    for _ in range(20):
+                        params = {'created': {'gte': lower, 'lte': int(time.time())}, 'limit': 100}
+                        if cursor_id:
+                            params['starting_after'] = cursor_id
+                        page = avart_object(stripe.checkout.Session.list(**params))
+                        rows = [avart_object(row) for row in page.get('data', [])]
+                        for row in rows:
+                            if (row.get('metadata') or {}).get('avart_reference') == reference or row.get('client_reference_id') == reference:
+                                session = row
+                                break
+                        if session or not page.get('has_more'):
+                            complete = not page.get('has_more')
+                            break
+                        if not rows:
+                            break
+                        cursor_id = rows[-1]['id']
+                    if not session and complete and int(request['expires_at']) < int(time.time()):
+                        # Account-wide list confirms no live Checkout ever existed.
+                        connection = get_db_connection()
+                        try:
+                            with connection.cursor() as cursor:
+                                cursor.execute('SELECT id FROM orders WHERE order_number = %s', (reference,))
+                                order = cursor.fetchone()
+                                if order:
+                                    release_gift_reservation(cursor, order['id'])
+                                avart_campaign_status(cursor, reference, 'released')
+                                cursor.execute("UPDATE avart_payment_attempts SET status = 'failed' WHERE reference = %s AND stripe_session_id IS NULL", (reference,))
+                            connection.commit()
+                        finally:
+                            connection.close()
+                        continue
+            elif (datetime.now() - attempt['created_at']).total_seconds() > 3600:
+                # Request not persisted: our code never calls Stripe Session.create.
+                connection = get_db_connection()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute('SELECT id FROM orders WHERE order_number = %s', (reference,))
+                        order = cursor.fetchone()
+                        if order:
+                            release_gift_reservation(cursor, order['id'])
+                        avart_campaign_status(cursor, reference, 'released')
+                        cursor.execute("UPDATE avart_payment_attempts SET status = 'failed' WHERE reference = %s AND request_json IS NULL AND stripe_session_id IS NULL", (reference,))
+                    connection.commit()
+                finally:
+                    connection.close()
+                continue
+            if not session:
+                continue
+            connection = get_db_connection()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("UPDATE avart_payment_attempts SET stripe_session_id = %s, status = %s WHERE reference = %s AND status != 'paid'", (session['id'], 'open', reference))
+                    cursor.execute('UPDATE orders SET stripe_session_id = %s WHERE order_number = %s AND stripe_session_id IS NULL', (session['id'], reference))
+                    refs = (session.get('metadata') or {}).get('avart_gift_refs', '')
+                    for gift_ref in refs.split(','):
+                        if gift_ref:
+                            cursor.execute('UPDATE avart_gift_purchases SET stripe_session_id = %s WHERE reference = %s AND stripe_session_id IS NULL', (session['id'], gift_ref))
+                connection.commit()
+            finally:
+                connection.close()
+            if session.get('status') == 'expired':
+                avart_release_attempt(session)
+            elif session.get('status') == 'complete':
+                # Payment has completed: keep funds protected; replay signed Stripe
+                # webhook from Dashboard to finish if the original delivery was lost.
+                avart_save_attempt(reference, status='needs_review')
+        except Exception:
+            # Keep reservation when Stripe cannot conclusively answer.
+            continue
+
+
+def avart_create_stripe_session(**kwargs):
+    reference = (kwargs.get('metadata') or {}).get('avart_reference') or kwargs.get('client_reference_id')
+    if not reference:
+        raise ValueError('Payment reference missing')
+    # Original promotion deadline is checked against actual Checkout expiry.
+    deadline = (kwargs.get('metadata') or {}).get('avart_campaign_deadline')
+    if deadline and int(kwargs['expires_at']) > int(deadline):
+        raise ValueError('Rabatkoden udløber for snart til at starte en ny betaling.')
+    avart_save_attempt(reference, request_json=json.dumps(kwargs, ensure_ascii=False))
+    try:
+        session = stripe.checkout.Session.create(**kwargs)
+    except Exception:
+        # Same key/args: Stripe returns same Session if the first response was lost.
+        session = stripe.checkout.Session.create(**kwargs)
+
+    avart_save_attempt(reference, stripe_session_id=session.id, status='open')
+    return session
+
+def avart_checkout_discount(discount_ore, reference, campaign):
+    if not discount_ore:
+        return {}
+    # Single-use, short-lived coupon, not a reusable substitute for the gift ledger.
+    import time
+    params = dict(amount_off=discount_ore, currency='dkk', duration='once',
+        max_redemptions=1, redeem_by=int(time.time())+3600,
+        name=('Rabat og gavekort' if campaign and discount_ore > campaign['discount_ore'] else ('Rabat' if campaign else 'Gavekort')),
+        metadata={'avart_reference': reference}, idempotency_key='avart-cut-'+reference)
+    try:
+        coupon = stripe.Coupon.create(**params)
+    except Exception:
+        coupon = stripe.Coupon.create(**params)
+    return {'discounts': [{'coupon': coupon.id}]}
+
+
+@app.post('/checkout/quote')
+async def avart_checkout_quote(data: dict):
+    try:
+        amounts, posters = avart_quote_items(data.get('items'))
+        avart_reconcile_payments()
+        campaign = avart_campaign(data.get('promo_code'), sum(amounts))
+        if campaign:
+            connection = get_db_connection()
+            try:
+                with connection.cursor() as cursor:
+                    avart_reserve_campaign(cursor, campaign, 'QUOTE-' + secrets.token_hex(8))
+                connection.rollback()
+            finally:
+                connection.close()
+        balance = 0
+        code = gift_normalize_code(data.get('gift_code'))
+        if code:
+            if not any(posters):
+                raise ValueError('Gavekort kan kun bruges til plakater.')
+            connection = get_db_connection()
+            try:
+                with connection.cursor() as cursor:
+                    card = gift_find_card(cursor, code)
+                    if not card:
+                        raise ValueError('Gavekortet findes ikke eller er udløbet.')
+                    balance = gift_available_ore(cursor, card['id'], card['balance_ore'])
+                    if balance <= 0:
+                        raise ValueError('Gavekortet er brugt op eller reserveret til en anden betaling.')
+            finally:
+                connection.close()
+        result = avart_price_breakdown(amounts, posters, campaign, balance)
+        result['promo_code'] = (campaign or {}).get('code', '')
+        return result
+    except ValueError as error:
+        return JSONResponse({'error': str(error)}, status_code=400)
+    except Exception:
+        return JSONResponse({'error': 'Rabat og gavekort kunne ikke kontrolleres. Prøv igen om lidt.'}, status_code=503)
+
+
 @app.post("/create-checkout-session")
 async def create_checkout_session(data: dict):
 
@@ -3450,6 +3807,16 @@ async def create_checkout_session(data: dict):
             status_code=400,
         )
 
+    try:
+        amounts = [line['price_data']['unit_amount'] for line in line_items]
+        poster_flags = [item.get('type') != 'gift' for item in items]
+        campaign = avart_campaign(data.get('promo_code'), sum(amounts))
+        pricing = avart_price_breakdown(amounts, poster_flags, campaign)
+    except ValueError as error:
+        return JSONResponse({'error': str(error)}, status_code=400)
+    except Exception:
+        return JSONResponse({'error': 'Rabatkoden kunne ikke kontrolleres. Prøv igen om lidt.'}, status_code=503)
+
     # Unikt ordrenummer, fx AVA-A81C92F04D
     order_number = "AVA-" + secrets.token_hex(5).upper()
 
@@ -3531,14 +3898,21 @@ async def create_checkout_session(data: dict):
                 )
                 gift["reference"] = reference
 
-            # Gavekort: reserver saldo (kun plakater – fragt betales altid)
+            avart_reserve_campaign(cursor, campaign, order_number)
+            cursor.execute('UPDATE orders SET discount_ore = %s WHERE id = %s', (pricing['discount_ore'], order_id))
+
+            # Gavekort: reserver saldo efter rabat, kun til plakater.
             if gift_normalize_code(gift_code):
-                gift_ore = reserve_gift_card(cursor, gift_code, order_id, subtotal * 100)
+                if not any(poster_flags):
+                    raise ValueError('Gavekort kan kun bruges til plakater.')
+                if pricing['poster_net_ore'] > 0:
+                    gift_ore = reserve_gift_card(cursor, gift_code, order_id, pricing['poster_net_ore'])
                 cursor.execute(
                     "UPDATE orders SET gift_card_ore = %s WHERE id = %s",
                     (gift_ore, order_id),
                 )
 
+            avart_payment_attempt(cursor, order_number, subtotal*100, pricing['discount_ore'], gift_ore, 4900)
         connection.commit()
 
     except ValueError as e:
@@ -3559,22 +3933,17 @@ async def create_checkout_session(data: dict):
         if connection:
             connection.close()
 
-    # Træk gavekortbeløbet fra plakatlinjerne (fragten røres ikke)
-    remaining_gift = gift_ore
-    for line in line_items:
-        if remaining_gift <= 0:
-            break
-        cut = min(remaining_gift, line["price_data"]["unit_amount"])
-        line["price_data"]["unit_amount"] -= cut
-        line["price_data"]["product_data"]["name"] += " (gavekort fratrukket)"
-        remaining_gift -= cut
-
+    # Bevar oprindelige varelinjer. Én ordrebundet Stripe-rabat repræsenterer
+    # kampagne + gavekort; deres separate beløb gemmes og bogføres hos AVART.
     # Opret Stripe Checkout efter at ordren er gemt
     try:
-        session = stripe.checkout.Session.create(
+        session = avart_create_stripe_session(
             mode="payment",
             line_items=line_items,
             allow_promotion_codes=False,
+            payment_method_types=['card'],
+            **avart_checkout_discount(pricing['discount_ore'] + gift_ore, order_number, campaign),
+            idempotency_key='avart-checkout-'+order_number,
 
             shipping_options=[
                 {
@@ -3595,6 +3964,9 @@ async def create_checkout_session(data: dict):
                 "kind": "poster_order",
                 "order_id": str(order_id),
                 "order_number": order_number,
+                'avart_reference': order_number,
+                'avart_campaign_deadline': str((campaign or {}).get('deadline') or ''),
+                'avart_gift_refs': ','.join(g['reference'] for g in gift_items),
             },
 
             billing_address_collection="required",
@@ -3612,7 +3984,7 @@ async def create_checkout_session(data: dict):
                 "&session_id={CHECKOUT_SESSION_ID}"
             ),
 
-            cancel_url="https://avart.dk/?payment=cancel",
+            cancel_url="https://avart.dk/?payment=cancel&session_id={CHECKOUT_SESSION_ID}",
 
             expires_at=int(__import__("time").time()) + 1800,
         )
@@ -3647,15 +4019,19 @@ async def create_checkout_session(data: dict):
         }
 
     except Exception:
-        if gift_ore:
-            try:
-                connection = get_db_connection()
-                with connection.cursor() as cursor:
-                    release_gift_reservation(cursor, order_id)
-                connection.commit()
+        # Reconcile an ambiguous Stripe timeout with the same idempotency key
+        # before releasing anything. A lost response may still represent a live
+        # payment. Conservatively retain holds on creation errors.
+        try:
+            connection = get_db_connection()
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE orders SET order_status = 'needs_review' WHERE id = %s", (order_id,))
+            connection.commit()
+        except Exception:
+            pass
+        finally:
+            if connection:
                 connection.close()
-            except Exception:
-                pass
         return JSONResponse(
             {
                 "error": "Betalingen kunne ikke oprettes. Prøv igen."
@@ -3784,6 +4160,10 @@ def avart_customer_email_html(order, items, gift_rows=None):
         '<td align="right" style="padding:16px 0">−{}</td></tr>'.format(avart_money(gift_deduction))
         if gift_deduction else ""
     )
+    discount_ore = int(order.get('discount_ore') or 0)
+    discount_row = ('<tr><td colspan="3" style="padding:16px 0">Rabat</td>'
+                    '<td align="right" style="padding:16px 0">−{}</td></tr>'.format(avart_money(discount_ore / 100))
+                    if discount_ore else '')
     intro = "Vi har modtaget din ordre og lægger din plakat i kø! Snart er dit billede på vej fra idé til virkelighed."
     if not items:
         intro = ("Hvert gavekort er vedhæftet som PDF, så du kan printe dem eller sende dem videre. "
@@ -3791,16 +4171,16 @@ def avart_customer_email_html(order, items, gift_rows=None):
                  f"Gavekortene er gyldige i {GIFT_VALID_YEARS} år.")
     substitutions = {
         "INTRO_TEXT": intro, "PAYMENT_STATUS": "Betalt med Stripe",
-        "GIFT_DEDUCTION_ROW": deduction_row,
+        "GIFT_DEDUCTION_ROW": deduction_row, 'DISCOUNT_ROW': discount_row,
         "PRODUCTION_DATE": prod_date, "SHIPPING_DATE": ship_date,
         "ORDER_NUMBER": order["order_number"], "ORDER_DATE": order_date,
         "ITEM_ROWS": "".join(rows), "SHIPPING_PRICE": avart_money(order["shipping_dkk"]),
-        "TOTAL_PRICE": avart_money(total), "VAT_AMOUNT": avart_money(total / 5),
+        "TOTAL_PRICE": avart_money(total), "VAT_AMOUNT": avart_money((total + gift_deduction) / 5),
         "SHIPPING_NAME": order.get("shipping_name") or order.get("customer_name") or "",
         "SHIPPING_ADDRESS": address,
     }
     for key, value in substitutions.items():
-        template = template.replace("{{" + key + "}}", value if key in ("ITEM_ROWS", "GIFT_DEDUCTION_ROW") else html_escape(str(value)))
+        template = template.replace("{{" + key + "}}", value if key in ("ITEM_ROWS", "GIFT_DEDUCTION_ROW", "DISCOUNT_ROW") else html_escape(str(value)))
     # Encode the subject in the mailto URL, including the current order number.
     template = template.replace("subject=Sp%C3%B8rgsm%C3%A5l%20til%20ordre%20" + html_escape(order["order_number"]),
         "subject=" + quote("Spørgsmål til ordre " + order["order_number"]))
@@ -4123,13 +4503,13 @@ def gift_amount_from_request(data):
 def gift_available_ore(cursor, card_id, balance_ore):
     cursor.execute(
         """
-        SELECT COALESCE(SUM(amount_ore), 0) AS reserved
+        SELECT amount_ore
         FROM avart_gift_reservations
-        WHERE card_id = %s AND status = 'active' AND expires_at > NOW()
+        WHERE card_id = %s AND status = 'active' FOR UPDATE
         """,
         (card_id,),
     )
-    return max(0, int(balance_ore) - int(cursor.fetchone()["reserved"]))
+    return max(0, int(balance_ore) - sum(int(row["amount_ore"]) for row in cursor.fetchall()))
 
 
 def gift_find_card(cursor, code, lock=False):
@@ -4164,20 +4544,26 @@ def settle_gift_reservation(cursor, order_id):
     """Trækker reservationen fra saldoen. Sikker at kalde flere gange."""
     cursor.execute(
         "SELECT id, card_id, amount_ore, status FROM avart_gift_reservations "
-        "WHERE order_id = %s FOR UPDATE",
+        "WHERE order_id = %s",
         (order_id,),
     )
     reservation = cursor.fetchone()
-    if not reservation or reservation["status"] == "spent":
+    if not reservation or reservation['status'] == 'spent':
         return
     cursor.execute(
         "SELECT balance_ore FROM avart_gift_cards WHERE id = %s FOR UPDATE",
         (reservation["card_id"],),
     )
     card = cursor.fetchone()
-    new_balance = max(0, int(card["balance_ore"]) - int(reservation["amount_ore"]))
-    if int(card["balance_ore"]) < int(reservation["amount_ore"]):
-        print(f"AVART GIFT NEEDS REVIEW: order_id={order_id} balance too low", flush=True)
+    cursor.execute('SELECT id, card_id, amount_ore, status FROM avart_gift_reservations WHERE order_id = %s FOR UPDATE', (order_id,))
+    reservation = cursor.fetchone()
+    if not reservation or reservation['status'] == 'spent':
+        return
+    if reservation['status'] != 'active':
+        raise ValueError('Gavekortbetalingen kræver kontrol.')
+    if not card or int(card['balance_ore']) < int(reservation['amount_ore']):
+        raise ValueError('Gavekortbetalingen kræver kontrol.')
+    new_balance = int(card['balance_ore']) - int(reservation['amount_ore'])
     cursor.execute("UPDATE avart_gift_cards SET balance_ore = %s WHERE id = %s",
                    (new_balance, reservation["card_id"]))
     cursor.execute("UPDATE avart_gift_reservations SET status = 'spent' WHERE id = %s",
@@ -4185,11 +4571,40 @@ def settle_gift_reservation(cursor, order_id):
 
 
 def release_gift_reservation(cursor, order_id):
+    cursor.execute('SELECT id, card_id, amount_ore, status FROM avart_gift_reservations WHERE order_id = %s', (order_id,))
+    reservation = cursor.fetchone()
+    if not reservation:
+        return
+    cursor.execute('SELECT balance_ore FROM avart_gift_cards WHERE id = %s FOR UPDATE', (reservation['card_id'],))
+    cursor.fetchone()
     cursor.execute(
         "UPDATE avart_gift_reservations SET status = 'released' "
         "WHERE order_id = %s AND status = 'active'",
         (order_id,),
     )
+
+
+@app.post('/checkout/cancel')
+async def avart_cancel_checkout(data: dict):
+    session_id = str(data.get('session_id') or '')
+    if not session_id.startswith('cs_') or len(session_id) > 255:
+        return JSONResponse({'error': 'Betalingen kunne ikke findes.'}, status_code=400)
+    try:
+        connection = get_db_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT reference FROM avart_payment_attempts WHERE stripe_session_id = %s', (session_id,))
+                owned = cursor.fetchone()
+        finally:
+            connection.close()
+        if not owned:
+            return JSONResponse({'error': 'Betalingen kunne ikke findes.'}, status_code=404)
+        session = avart_object(stripe.checkout.Session.retrieve(session_id))
+        if session.get('status') == 'open':
+            session = avart_object(stripe.checkout.Session.expire(session_id))
+        return {'cancelled': avart_release_attempt(session)}
+    except Exception:
+        return JSONResponse({'error': 'Betalingen kunne ikke annulleres. Prøv igen om lidt.'}, status_code=503)
 
 
 @app.post("/gift-card/balance")
@@ -4224,11 +4639,20 @@ async def gift_card_checkout(data: dict):
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
+    try:
+        campaign = avart_campaign(data.get('promo_code'), sum(amount for amount, _ in parsed))
+    except ValueError as error:
+        return JSONResponse({'error': str(error)}, status_code=400)
+    except Exception:
+        return JSONResponse({'error': 'Rabatkoden kunne ikke kontrolleres. Prøv igen om lidt.'}, status_code=503)
+    checkout_reference = 'GAVE-ORDER-' + secrets.token_hex(6).upper()
     references = []
     connection = get_db_connection()
     try:
         try:
             with connection.cursor() as cursor:
+                avart_reserve_campaign(cursor, campaign, checkout_reference)
+                avart_payment_attempt(cursor, checkout_reference, sum(amount for amount, _ in parsed), (campaign or {}).get('discount_ore', 0), 0, 0)
                 for amount_ore, size in parsed:
                     reference = "GAVE-" + secrets.token_hex(5).upper()
                     cursor.execute(
@@ -4237,9 +4661,12 @@ async def gift_card_checkout(data: dict):
                     )
                     references.append(reference)
             connection.commit()
+        except ValueError as error:
+            connection.rollback()
+            return JSONResponse({'error': str(error)}, status_code=400)
         except Exception:
             connection.rollback()
-            return JSONResponse({"error": "Gavekortet kunne ikke oprettes."}, status_code=500)
+            return JSONResponse({'error': 'Gavekortet kunne ikke oprettes.'}, status_code=500)
     finally:
         connection.close()
 
@@ -4256,14 +4683,20 @@ async def gift_card_checkout(data: dict):
         })
 
     try:
-        session = stripe.checkout.Session.create(
+        session = avart_create_stripe_session(
             mode="payment",
             line_items=line_items,
-            metadata={"kind": "gift_card"},
+            allow_promotion_codes=False,
+            payment_method_types=['card'],
+            **avart_checkout_discount((campaign or {}).get('discount_ore', 0), checkout_reference, campaign),
+            idempotency_key='avart-checkout-'+checkout_reference,
+            metadata={'kind': 'gift_card', 'avart_reference': checkout_reference,
+                      'avart_campaign_deadline': str((campaign or {}).get('deadline') or ''),
+                      'avart_discount_ore': str((campaign or {}).get('discount_ore', 0)), 'avart_gift_refs': ','.join(references)},
             customer_creation="if_required",
             billing_address_collection="auto",
             success_url="https://avart.dk/?payment=success&gift=1&session_id={CHECKOUT_SESSION_ID}",
-            cancel_url="https://avart.dk/?payment=cancel#gavekort",
+            cancel_url="https://avart.dk/?payment=cancel&session_id={CHECKOUT_SESSION_ID}#gavekort",
             expires_at=int(__import__("time").time()) + 1800,
         )
         connection = get_db_connection()
@@ -4407,10 +4840,28 @@ def fulfil_gift_purchases(session, order_id=None):
             if not purchases:
                 connection.rollback()
                 return {"received": True, "gift_cards": "not_found"}
-            if session.get("currency") != "dkk" or (order_id is None and session.get("amount_total") != sum(
-                    int(purchase["amount_ore"]) for purchase in purchases)):
+            subtotal_ore = sum(int(purchase['amount_ore']) for purchase in purchases)
+            campaign_discount = 0
+            if order_id is None:
+                cursor.execute('SELECT * FROM avart_payment_attempts WHERE stripe_session_id = %s FOR UPDATE', (session_id,))
+                attempt = cursor.fetchone()
+                if not attempt or attempt['subtotal_ore'] != subtotal_ore or attempt['gift_ore'] != 0 or attempt['shipping_ore'] != 0 or attempt['currency'] != 'dkk':
+                    connection.rollback()
+                    return {'received': True, 'gift_cards': 'amount_mismatch'}
+                campaign_discount = int(attempt['discount_ore'])
+            if session.get('currency') != 'dkk' or (order_id is None and (
+                session.get('amount_subtotal') != subtotal_ore
+                or not 0 <= campaign_discount <= subtotal_ore
+                or int((session.get('total_details') or {}).get('amount_discount') or 0) != campaign_discount
+                or session.get('amount_total') != subtotal_ore - campaign_discount
+            )):
                 connection.rollback()
                 return {"received": True, "gift_cards": "amount_mismatch"}
+
+            if order_id is None:
+                reference = attempt['reference']
+                avart_campaign_status(cursor, reference, 'spent')
+                cursor.execute("UPDATE avart_payment_attempts SET status = 'paid' WHERE reference = %s", (reference,))
 
             expires = datetime.now(AVART_TIMEZONE).date() + timedelta(days=365 * GIFT_VALID_YEARS + 1)
             for purchase in purchases:
@@ -4485,6 +4936,7 @@ def fulfil_gift_purchases(session, order_id=None):
                 "shipping_postal_code": address.get("postal_code"), "shipping_city": address.get("city"),
                 "shipping_dkk": 0, "total_dkk": session["amount_total"] / 100,
                 "amount_paid_ore": session["amount_total"], "gift_card_ore": 0,
+                'discount_ore': campaign_discount,
             }
             send_avart_confirmation_message(order, [], avart_gift_item_rows(cards), attachments)
 
@@ -4536,17 +4988,9 @@ async def stripe_webhook(request: Request):
         )
 
     # Udløbet betaling: frigiv et eventuelt reserveret gavekortbeløb
-    if event["type"] == "checkout.session.expired":
+    if event['type'] == 'checkout.session.expired':
         expired = event["data"]["object"].to_dict()
-        order_ref = (expired.get("metadata") or {}).get("order_id")
-        if order_ref and str(order_ref).isdigit():
-            connection = get_db_connection()
-            try:
-                with connection.cursor() as cursor:
-                    release_gift_reservation(cursor, int(order_ref))
-                connection.commit()
-            finally:
-                connection.close()
+        avart_release_attempt(expired)
         return {"received": True}
 
     # Vi behandler kun gennemførte Checkout-sessioner
@@ -4557,7 +5001,8 @@ async def stripe_webhook(request: Request):
     session = session.to_dict()
 
     # En gennemført Checkout-session er ikke altid betalt endnu
-    if session.get("payment_status") != "paid":
+    if not (session.get('payment_status') == 'paid' or (
+            session.get('payment_status') == 'no_payment_required' and session.get('amount_total') == 0)) :
         return {"received": True, "payment": "pending"}
 
     if (session.get("metadata") or {}).get("kind") == "gift_card":
@@ -4582,7 +5027,7 @@ async def stripe_webhook(request: Request):
             # Find ordren og lås den under opdateringen
             cursor.execute(
                 """
-                SELECT id, payment_status, subtotal_dkk, shipping_dkk, gift_card_ore
+                SELECT id, payment_status, subtotal_dkk, shipping_dkk, gift_card_ore, discount_ore
                 FROM orders
                 WHERE order_number = %s
                   AND stripe_session_id = %s
@@ -4609,10 +5054,13 @@ async def stripe_webhook(request: Request):
             amount_subtotal = session.get("amount_subtotal")
             discount_ore = int(details.get("amount_discount") or 0)
             shipping_ore = int(details.get("amount_shipping") or 0)
-            expected_subtotal = order["subtotal_dkk"] * 100 - int(order["gift_card_ore"] or 0)
+            expected_subtotal = order['subtotal_dkk'] * 100
+            campaign_discount = int(order.get('discount_ore') or 0)
+            expected_discount = campaign_discount + int(order.get('gift_card_ore') or 0)
 
             if (
                 amount_subtotal != expected_subtotal
+                or discount_ore != expected_discount
                 or shipping_ore != order["shipping_dkk"] * 100
                 or amount_total != amount_subtotal + shipping_ore - discount_ore
                 or currency != "dkk"
@@ -4674,12 +5122,14 @@ async def stripe_webhook(request: Request):
                     address.get("postal_code"),
                     address.get("city"),
                     address.get("country", "DK"),
-                    discount_ore,
+                    campaign_discount,
                     amount_total,
                     order["id"],
                 ),
             )
-                settle_gift_reservation(cursor, order["id"])
+                settle_gift_reservation(cursor, order['id'])
+                avart_campaign_status(cursor, order_number, 'spent')
+                cursor.execute("UPDATE avart_payment_attempts SET status = 'paid' WHERE stripe_session_id = %s", (session_id,))
 
         connection.commit()
 
