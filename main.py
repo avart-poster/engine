@@ -3680,6 +3680,9 @@ async def avart_checkout_quote(data: dict):
                 connection.close()
         result = avart_price_breakdown(amounts, posters, campaign, balance)
         result['promo_code'] = (campaign or {}).get('code', '')
+        if campaign:
+            percent = campaign['coupon'].get('percent_off')
+            result['discount_percent'] = float(percent) if percent is not None else None
         return result
     except ValueError as error:
         return JSONResponse({'error': str(error)}, status_code=400)
