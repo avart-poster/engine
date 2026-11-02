@@ -3943,7 +3943,6 @@ async def create_checkout_session(data: dict):
         session = avart_create_stripe_session(
             mode="payment",
             line_items=line_items,
-            allow_promotion_codes=False,
             **avart_checkout_discount(pricing['discount_ore'] + gift_ore, order_number, campaign),
             idempotency_key='avart-checkout-'+order_number,
 
@@ -4697,7 +4696,6 @@ async def gift_card_checkout(data: dict):
         session = avart_create_stripe_session(
             mode="payment",
             line_items=line_items,
-            allow_promotion_codes=False,
             **avart_checkout_discount((campaign or {}).get('discount_ore', 0), checkout_reference, campaign),
             idempotency_key='avart-checkout-'+checkout_reference,
             metadata={'kind': 'gift_card', 'avart_reference': checkout_reference,
