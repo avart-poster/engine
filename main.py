@@ -3348,16 +3348,26 @@ def avart_campaign(code, subtotal_ore):
     if len(code) > 100:
         raise ValueError('Rabatkoden er ugyldig.')
     import time
-    found = avart_object(stripe.PromotionCode.list(code=code, active=True, limit=100))
-    matches = [avart_object(p) for p in found.get('data', []) if str(p.get('code', '')).casefold() == code.casefold()]
-    if len(matches) != 1:
-        raise ValueError('Rabatkoden findes ikke eller er ikke aktiv.')
-    promo = matches[0]
-    coupon_ref = promo.get('coupon') or (promo.get('promotion') or {}).get('coupon')
-    coupon_id = coupon_ref if isinstance(coupon_ref, str) else avart_object(coupon_ref).get('id')
-    if not coupon_id:
-        raise ValueError('Denne rabatkode kan ikke bruges til denne bestilling.')
-    coupon = avart_object(stripe.Coupon.retrieve(coupon_id))
+    # Kort cache: "Brug" har lige hentet koden hos Stripe, så betaling genbruger den.
+    # Udløb/start/minimum tjekkes stadig nu; brugsgrænser håndhæves af AVARTs låste ledger.
+    cache = globals().setdefault('_AVART_CAMPAIGN_CACHE', {})
+    cached = cache.get(code.casefold())
+    if cached and cached[0] > time.time():
+        promo, coupon = dict(cached[1]), dict(cached[2])
+    else:
+        found = avart_object(stripe.PromotionCode.list(code=code, active=True, limit=100))
+        matches = [avart_object(p) for p in found.get('data', []) if str(p.get('code', '')).casefold() == code.casefold()]
+        if len(matches) != 1:
+            raise ValueError('Rabatkoden findes ikke eller er ikke aktiv.')
+        promo = matches[0]
+        coupon_ref = promo.get('coupon') or (promo.get('promotion') or {}).get('coupon')
+        coupon_id = coupon_ref if isinstance(coupon_ref, str) else avart_object(coupon_ref).get('id')
+        if not coupon_id:
+            raise ValueError('Denne rabatkode kan ikke bruges til denne bestilling.')
+        coupon = avart_object(stripe.Coupon.retrieve(coupon_id))
+        if len(cache) > 200:
+            cache.clear()
+        cache[code.casefold()] = (time.time() + 120, dict(promo), dict(coupon))
     now = int(time.time())
     if not coupon.get('valid') or any(int(v) <= now for v in [promo.get('expires_at'), coupon.get('redeem_by')] if v is not None):
         raise ValueError('Rabatkoden er udløbet.')
@@ -3477,17 +3487,20 @@ def avart_payment_attempt(cursor, reference, subtotal, discount, gift, shipping)
                    (reference, subtotal, discount, gift, shipping, subtotal-discount-gift+shipping))
 
 
-def avart_save_attempt(reference, **values):
+def avart_save_attempt(reference, connection=None, **values):
     allowed = {'request_json', 'stripe_session_id', 'status'}
     if not values or not set(values) <= allowed:
         raise ValueError('Invalid attempt fields')
-    connection = get_db_connection()
+    own = connection is None
+    if own:
+        connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute('UPDATE avart_payment_attempts SET ' + ', '.join(key+' = %s' for key in values) + ' WHERE reference = %s', tuple(values.values()) + (reference,))
         connection.commit()
     finally:
-        connection.close()
+        if own:
+            connection.close()
 
 
 def avart_release_attempt(session):
@@ -3614,7 +3627,7 @@ def avart_reconcile_payments():
             continue
 
 
-def avart_create_stripe_session(**kwargs):
+def avart_create_stripe_session(_connection=None, **kwargs):
     reference = (kwargs.get('metadata') or {}).get('avart_reference') or kwargs.get('client_reference_id')
     if not reference:
         raise ValueError('Payment reference missing')
@@ -3622,14 +3635,22 @@ def avart_create_stripe_session(**kwargs):
     deadline = (kwargs.get('metadata') or {}).get('avart_campaign_deadline')
     if deadline and int(kwargs['expires_at']) > int(deadline):
         raise ValueError('Rabatkoden udløber for snart til at starte en ny betaling.')
-    avart_save_attempt(reference, request_json=json.dumps(kwargs, ensure_ascii=False))
+    avart_save_attempt(reference, connection=_connection, request_json=json.dumps(kwargs, ensure_ascii=False))
     try:
         session = stripe.checkout.Session.create(**kwargs)
     except Exception:
         # Same key/args: Stripe returns same Session if the first response was lost.
         session = stripe.checkout.Session.create(**kwargs)
 
-    avart_save_attempt(reference, stripe_session_id=session.id, status='open')
+    # Gemmes i baggrunden, så kunden ikke venter. Fejler det, finder
+    # avart_reconcile_payments sessionen igen via den gemte request_json.
+    import threading
+    def save_open():
+        try:
+            avart_save_attempt(reference, stripe_session_id=session.id, status='open')
+        except Exception:
+            print('AVART could not save open checkout', reference, flush=True)
+    threading.Thread(target=save_open, daemon=True).start()
     return session
 
 def avart_checkout_discount(discount_ore, reference, campaign):
@@ -3648,11 +3669,19 @@ def avart_checkout_discount(discount_ore, reference, campaign):
     return {'discounts': [{'coupon': coupon.id}]}
 
 
+def avart_reconcile_payments_safe():
+    try:
+        avart_reconcile_payments()
+    except Exception:
+        print('AVART reconcile failed', flush=True)
+
+
 @app.post('/checkout/quote')
 async def avart_checkout_quote(data: dict):
     try:
         amounts, posters = avart_quote_items(data.get('items'))
-        avart_reconcile_payments()
+        import threading
+        threading.Thread(target=lambda: avart_reconcile_payments_safe(), daemon=True).start()
         campaign = avart_campaign(data.get('promo_code'), sum(amounts))
         if campaign:
             connection = get_db_connection()
@@ -3921,26 +3950,31 @@ async def create_checkout_session(data: dict):
     except ValueError as e:
         if connection:
             connection.rollback()
+            connection.close()
         return JSONResponse({"error": str(e)}, status_code=400)
 
     except Exception:
         if connection:
             connection.rollback()
+            connection.close()
 
         return JSONResponse(
             {"error": "Bestillingen kunne ikke gemmes."},
             status_code=500,
         )
 
-    finally:
+    except BaseException:
         if connection:
             connection.close()
+        raise
+    # Forbindelsen holdes åben og genbruges til at gemme betalingsforsøget.
 
     # Bevar oprindelige varelinjer. Én ordrebundet Stripe-rabat repræsenterer
     # kampagne + gavekort; deres separate beløb gemmes og bogføres hos AVART.
     # Opret Stripe Checkout efter at ordren er gemt
     try:
         session = avart_create_stripe_session(
+            _connection=connection,
             mode="payment",
             line_items=line_items,
             **avart_checkout_discount(pricing['discount_ore'] + gift_ore, order_number, campaign),
@@ -3990,8 +4024,6 @@ async def create_checkout_session(data: dict):
             expires_at=int(__import__("time").time()) + 2100,
         )
 
-        connection = get_db_connection()
-
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -4026,6 +4058,10 @@ async def create_checkout_session(data: dict):
         # svar beholdes reservationen, til afstemningen har bekræftet fravær.
         status = getattr(error, 'http_status', None) or 0
         rejected = 400 <= int(status) < 500 and status != 409
+        try:
+            connection.close()
+        except Exception:
+            pass
         try:
             connection = get_db_connection()
             with connection.cursor() as cursor:
