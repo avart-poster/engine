@@ -1581,6 +1581,8 @@ def generate_poster_pdf(
                 0: 120,
                 1: 105,
                 2: 90,
+                3: 75,
+                4: 60,
             }
         
         else:
@@ -1594,6 +1596,8 @@ def generate_poster_pdf(
                 0: 160,
                 1: 135,
                 2: 110,
+                3: 90,
+                4: 70,
             }
         
         height_ratio = page_h_mm / reference_height_mm
@@ -1605,7 +1609,7 @@ def generate_poster_pdf(
         
         if scale_level not in top_positions_mm:
             raise ValueError(
-                "scale_level must be between -4 and 2"
+                "scale_level must be between -4 and 4"
             )
         
         target_top_mm = top_positions_mm[scale_level]
@@ -1759,7 +1763,8 @@ def poster_group_layout(person_widths, available_width):
         w = slot_width * group_scale
         return group_scale, w, [w / 2]
     if n == 2:
-        group_scale = min(1.0, 0.75 * available_width / slot_width)
+        # Højden styrer størrelsen; de krymper kun hvis én er bredere end hele X.
+        group_scale = min(1.0, available_width / slot_width)
         w = slot_width * group_scale
         step = available_width - w
         return group_scale, available_width, [w / 2, w / 2 + step]
@@ -1906,6 +1911,8 @@ def generate_multi_poster_pdf(
             0: 120,
             1: 105,
             2: 90,
+            3: 75,
+            4: 60,
         }
     
     else:
@@ -1919,6 +1926,8 @@ def generate_multi_poster_pdf(
             0: 160,
             1: 135,
             2: 110,
+            3: 90,
+            4: 70,
         }
     
     height_ratio = page_h_mm / reference_height_mm
@@ -2020,7 +2029,7 @@ def generate_multi_poster_pdf(
 
             if scale_level not in top_positions_mm:
                 raise ValueError(
-                    "scale_level must be between -4 and 2"
+                    "scale_level must be between -4 and 4"
                 )
 
             # Midlertidig SVG
@@ -3832,7 +3841,7 @@ async def create_checkout_session(data: dict):
                 if not verify_svg(person["svg"], person.get("svg_sig")):
                     raise ValueError("Silhuetten kunne ikke godkendes. Upload billedet igen.")
 
-                if person.get("scale_level", 0) not in (-4, -3, -2, -1, 0, 1, 2):
+                if person.get("scale_level", 0) not in (-4, -3, -2, -1, 0, 1, 2, 3, 4):
                     raise ValueError("Ugyldig skalering.")
 
                 if not isinstance(person.get("flipped", False), bool):
