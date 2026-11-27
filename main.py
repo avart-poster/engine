@@ -1484,6 +1484,8 @@ def generate_poster_pdf(
         logo_width_mm = 30
 
     # Text and logo follow the green margin, not the red silhouette safe area.
+    # Final PDF points; svglib applies an internal 0.75 SVG-pixel transform.
+    stroke_width = {60: 2.75, 50: 2.50, 40: 2.25, 30: 2.0}[logo_width_mm] / 0.75
     green_margin_mm = {60: 65, 50: 50, 40: 45, 30: 30}[logo_width_mm]
     title_y = poster_title_baseline(height, green_margin_mm, TITLE_FONT, title_font_size)
     logo_width = logo_width_mm * mm
@@ -1581,6 +1583,8 @@ def generate_poster_pdf(
                 0: 120,
                 1: 105,
                 2: 90,
+                3: 75,
+                4: 60,
             }
         
         else:
@@ -1594,6 +1598,8 @@ def generate_poster_pdf(
                 0: 160,
                 1: 135,
                 2: 110,
+                3: 90,
+                4: 70,
             }
         
         height_ratio = page_h_mm / reference_height_mm
@@ -1605,7 +1611,7 @@ def generate_poster_pdf(
         
         if scale_level not in top_positions_mm:
             raise ValueError(
-                "scale_level must be between -4 and 2"
+                "scale_level must be between -4 and 4"
             )
         
         target_top_mm = top_positions_mm[scale_level]
@@ -1742,21 +1748,40 @@ def generate_poster_pdf(
 
 
 def poster_group_layout(person_widths, available_width):
-    """Use one shared width X, step X/2, and scale only the whole group.
+    """Layout ud fra X = bredden inden for margenen.
 
-    X is the widest height-adjusted contour's placement width. Narrower
-    contours are centered in that same slot, never stretched independently.
+    2 personer: hver er 3/4 X bred og de overlapper med 1/2 X.
+    3-4 personer: fælles bredde, overlap 1/2 bredde, centreret om midten;
+        er gruppen for bred, bliver hele gruppen mindre.
+    5-6 personer: størrelsen bevares, de går mere ind over hinanden.
+    Returnerer (group_scale, group_width, centers).
     """
     if not person_widths or min(person_widths) <= 0 or available_width <= 0:
         raise ValueError("Person widths and available width must be positive")
+    n = len(person_widths)
     slot_width = max(person_widths)
-    group_width = slot_width * (1 + (len(person_widths) - 1) / 2)
-    group_scale = min(1.0, available_width / group_width)
-    slot_width *= group_scale
-    group_width *= group_scale
-    centers = [slot_width / 2 + index * slot_width / 2
-               for index in range(len(person_widths))]
-    return group_scale, group_width, centers
+    if n == 1:
+        group_scale = min(1.0, available_width / slot_width)
+        w = slot_width * group_scale
+        return group_scale, w, [w / 2]
+    if n == 2:
+        # Højden styrer størrelsen; de krymper kun hvis én er bredere end hele X.
+        group_scale = min(1.0, available_width / slot_width)
+        w = slot_width * group_scale
+        step = available_width - w
+        return group_scale, available_width, [w / 2, w / 2 + step]
+    if n <= 4:
+        group_width = slot_width * (1 + (n - 1) / 2)
+        group_scale = min(1.0, available_width / group_width)
+        w = slot_width * group_scale
+        return group_scale, group_width * group_scale, [
+            w / 2 + i * w / 2 for i in range(n)]
+    # 5+ personer: behold størrelsen, øg overlappet i stedet.
+    group_scale = min(1.0, available_width / slot_width)
+    w = slot_width * group_scale
+    step = min(w / 2, (available_width - w) / (n - 1))
+    group_width = w + step * (n - 1)
+    return group_scale, group_width, [w / 2 + i * step for i in range(n)]
 
 
 def generate_multi_poster_pdf(
@@ -1819,6 +1844,9 @@ def generate_multi_poster_pdf(
         raise ValueError(
             f"Unknown poster size: {size}"
         )
+
+    # Final PDF points, compensated for svglib SVG pixels -> points.
+    stroke_width = {"A3": 2.0, "A2": 2.25, "50x70": 2.50, "A1": 2.75}[size] / 0.75
 
     base_w_mm, base_h_mm = size_dimensions[size]
     
@@ -1888,6 +1916,8 @@ def generate_multi_poster_pdf(
             0: 120,
             1: 105,
             2: 90,
+            3: 75,
+            4: 60,
         }
     
     else:
@@ -1901,6 +1931,8 @@ def generate_multi_poster_pdf(
             0: 160,
             1: 135,
             2: 110,
+            3: 90,
+            4: 70,
         }
     
     height_ratio = page_h_mm / reference_height_mm
@@ -2002,7 +2034,7 @@ def generate_multi_poster_pdf(
 
             if scale_level not in top_positions_mm:
                 raise ValueError(
-                    "scale_level must be between -4 and 2"
+                    "scale_level must be between -4 and 4"
                 )
 
             # Midlertidig SVG
@@ -2101,7 +2133,10 @@ def generate_multi_poster_pdf(
 
             # Prepare every height-adjusted contour before placing the group.
             prepared_persons.append((drawing, silhouette_scale, flipped))
-            person_widths.append(draw_w)
+            # Layout bruger bredden ved standardstørrelse (scale_level 0),
+            # så når én person skaleres op, bliver gruppen IKKE skaleret ned igen.
+            base_scale = (height - top_positions_mm[0] * mm) / raw_h
+            person_widths.append(draw_w * base_scale / silhouette_scale)
 
         minimum_side_margin = size_side_margins_mm[size] * mm
         maximum_group_width = width - 2 * minimum_side_margin
@@ -2119,8 +2154,15 @@ def generate_multi_poster_pdf(
 
             min_x, min_y, max_x, max_y = drawing.getBounds()
             draw_w = max_x - min_x
-            target_center_x = group_left + group_centers[index]
-            x = target_center_x - draw_w / 2 - min_x
+            if len(prepared_persons) == 2:
+                # Fast i nederste hjørne ved margenen; vokser ind over den anden.
+                if index == 0:
+                    x = minimum_side_margin - min_x
+                else:
+                    x = width - minimum_side_margin - max_x
+            else:
+                target_center_x = group_left + group_centers[index]
+                x = target_center_x - draw_w / 2 - min_x
 
             # --------------------------------------------
             # ALTID FAST I BUNDEN
@@ -3804,7 +3846,7 @@ async def create_checkout_session(data: dict):
                 if not verify_svg(person["svg"], person.get("svg_sig")):
                     raise ValueError("Silhuetten kunne ikke godkendes. Upload billedet igen.")
 
-                if person.get("scale_level", 0) not in (-4, -3, -2, -1, 0, 1, 2):
+                if person.get("scale_level", 0) not in (-4, -3, -2, -1, 0, 1, 2, 3, 4):
                     raise ValueError("Ugyldig skalering.")
 
                 if not isinstance(person.get("flipped", False), bool):
